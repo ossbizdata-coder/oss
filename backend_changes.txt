@@ -1,0 +1,69 @@
+// BACKEND CHANGES NEEDED:
+
+// 1. User.java - Add fields:
+@Column(name = "daily_salary")
+private Double dailySalary = 0.0;
+
+@Column(name = "deduction_rate_per_hour")
+private Double deductionRatePerHour = 0.0;
+
+// 2. Attendance.java - Add fields:
+@Column(name = "overtime_hours")
+private Double overtimeHours = 0.0;
+
+@Column(name = "deduction_hours")
+private Double deductionHours = 0.0;
+
+@Column(name = "overtime_reason")
+private String overtimeReason;
+
+@Column(name = "deduction_reason")
+private String deductionReason;
+
+// 3. SalaryService.java - Update calculation AND dailyBreakdown:
+Double dailySalary = user.getDailySalary();
+Double deductionRate = user.getDeductionRatePerHour();
+final double MIN_HOURS = 6.0;
+List<Map<String, Object>> dailyBreakdown = new ArrayList<>();
+
+for (Attendance att : attendances) {
+    if (att.getStatus().equals("COMPLETED")) {
+        double hoursWorked = att.getTotalMinutes() / 60.0;
+        double daySalary = 0.0;
+
+        if (hoursWorked >= MIN_HOURS) {
+            daySalary = dailySalary;
+            if (att.getOvertimeHours() > 0) {
+                daySalary += att.getOvertimeHours() * deductionRate;
+            }
+            if (att.getDeductionHours() > 0) {
+                daySalary -= att.getDeductionHours() * deductionRate;
+            }
+        }
+        totalSalary += daySalary;
+
+        // ⚠️ CRITICAL: Add overtime/deduction to daily breakdown
+        Map<String, Object> dayData = new HashMap<>();
+        dayData.put("date", att.getWorkDate().toString());
+        dayData.put("hours", hoursWorked);
+        dayData.put("salary", daySalary);
+        dayData.put("overtimeHours", att.getOvertimeHours() != null ? att.getOvertimeHours() : 0.0);
+        dayData.put("deductionHours", att.getDeductionHours() != null ? att.getDeductionHours() : 0.0);
+        dayData.put("overtimeReason", att.getOvertimeReason());
+        dayData.put("deductionReason", att.getDeductionReason());
+        dailyBreakdown.add(dayData);
+    }
+}
+
+// 4. AttendanceController.java - Add endpoint:
+@PutMapping("/{id}/adjustments")
+public ResponseEntity<?> updateAdjustments(@PathVariable Long id, @RequestBody Map<String, Object> request) {
+    Attendance att = attendanceRepository.findById(id).orElseThrow();
+    att.setOvertimeHours(((Number) request.get("overtimeHours")).doubleValue());
+    att.setDeductionHours(((Number) request.get("deductionHours")).doubleValue());
+    att.setOvertimeReason((String) request.get("overtimeReason"));
+    att.setDeductionReason((String) request.get("deductionReason"));
+    attendanceRepository.save(att);
+    return ResponseEntity.ok("Updated");
+}
+

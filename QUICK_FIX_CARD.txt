@@ -1,0 +1,89 @@
+╔══════════════════════════════════════════════════════════════════╗
+║  🚨 OVERTIME/DEDUCTION NOT SHOWING - QUICK FIX CARD            ║
+╚══════════════════════════════════════════════════════════════════╝
+
+📋 PROBLEM IDENTIFIED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your debug output shows:
+❌ Backend NOT returning overtime/deduction fields
+❌ User salary config = 0 (should be 3000/200 for Piumi)
+❌ Attendance API returning invalid JSON
+
+Flutter app is READY ✅ - Backend needs fixing! ⚠️
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 3-STEP FIX (15 minutes):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌─ STEP 1: Update Database (2 min) ─────────────────────────────┐
+│                                                                 │
+│  sqlite3 /path/to/database.db                                  │
+│                                                                 │
+│  UPDATE users SET daily_salary = 3000.0,                       │
+│    deduction_rate_per_hour = 200.0 WHERE id = 7;              │
+│                                                                 │
+│  UPDATE users SET daily_salary = 1500.0,                       │
+│    deduction_rate_per_hour = 125.0 WHERE id = 8;              │
+│                                                                 │
+│  UPDATE users SET daily_salary = 750.0,                        │
+│    deduction_rate_per_hour = 125.0 WHERE id = 9;              │
+│                                                                 │
+│  .quit                                                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 2: Fix Backend Code (10 min) ───────────────────────────┐
+│                                                                 │
+│  A. In SalaryReportService.java:                               │
+│     Add to daily breakdown loop:                               │
+│                                                                 │
+│     dayDto.setOvertimeHours(att.getOvertimeHours() ?? 0.0);   │
+│     dayDto.setDeductionHours(att.getDeductionHours() ?? 0.0); │
+│     dayDto.setOvertimeReason(att.getOvertimeReason());         │
+│     dayDto.setDeductionReason(att.getDeductionReason());       │
+│     dayDto.setQualified(hours >= MIN_HOURS);                   │
+│                                                                 │
+│  B. In OSS_AttendanceController.java:                          │
+│     Fix /today endpoint to not return empty body               │
+│     Include overtime/deduction in DTO                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 3: Restart & Test (5 min) ──────────────────────────────┐
+│                                                                 │
+│  sudo systemctl restart oss-backend                            │
+│  sudo systemctl status oss-backend                             │
+│                                                                 │
+│  # Test:                                                        │
+│  curl -H "Authorization: Bearer TOKEN" \                       │
+│    http://74.208.132.78/api/salary/me/monthly?year=2026&month=1 \│
+│    | jq '.dailyBreakdown[0]'                                   │
+│                                                                 │
+│  # Should show: overtimeHours, deductionHours, etc.            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ HOW TO VERIFY IT WORKS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Open Flutter app → Login
+2. Menu → "🔧 API Diagnostic"
+3. Check if response includes all fields
+4. Go to Salary screen
+5. Should see green/red badges for overtime/deduction
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📖 DETAILED GUIDES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+• COMPLETE_FIX_SUMMARY.md ........... Full step-by-step guide
+• BACKEND_NOT_RETURNING_FIELDS.md ... Backend fix details
+• update_user_salaries.sql ......... SQL script ready to run
+• OVERTIME_TROUBLESHOOTING.md ....... Diagnostic procedures
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STATUS: Flutter ✅ Ready | Backend ⚠️ Needs Fix | ETA: 15 min
+
