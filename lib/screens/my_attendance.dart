@@ -82,28 +82,45 @@ class _MyAttendanceReportScreenState
   }
 
   Map<String, dynamic> determineStatus(Map a) {
-    final checkIn = a["checkInTime"];
-    final checkOut = a["checkOutTime"];
-    final manualCheckout = a["manualCheckout"] == true;
+    // Check for new status-based system first
+    final status = a["status"];
 
     String statusText;
     Color statusColor;
+    IconData statusIcon;
 
-    if (checkIn != null && checkOut != null) {
-      statusText = "COMPLETED";
+    if (status == "WORKING") {
+      statusText = "WORKED";
       statusColor = Colors.green;
-    } else if (checkIn != null && checkOut == null) {
-      statusText = "Checked In";
-      statusColor = Colors.orange;
-    } else {
-      statusText = "Pending";
+      statusIcon = Icons.check_circle;
+    } else if (status == "NOT_WORKING") {
+      statusText = "DID NOT WORK";
       statusColor = Colors.red;
+      statusIcon = Icons.cancel;
+    } else {
+      // Fallback to old check-in/check-out system
+      final checkIn = a["checkInTime"];
+      final checkOut = a["checkOutTime"];
+
+      if (checkIn != null && checkOut != null) {
+        statusText = "COMPLETED";
+        statusColor = Colors.green;
+        statusIcon = Icons.check_circle;
+      } else if (checkIn != null && checkOut == null) {
+        statusText = "Checked In";
+        statusColor = Colors.orange;
+        statusIcon = Icons.access_time;
+      } else {
+        statusText = "No Record";
+        statusColor = Colors.red;
+        statusIcon = Icons.error_outline;
+      }
     }
 
     return {
       "text": statusText,
       "color": statusColor,
-      "manualCheckout": manualCheckout
+      "icon": statusIcon,
     };
   }
 
@@ -126,70 +143,170 @@ class _MyAttendanceReportScreenState
 
           return Card(
             elevation: 2,
-            margin: const EdgeInsets.only(bottom: 10),
+            margin: const EdgeInsets.only(bottom: 12),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            formatDate(a["workDate"]),
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            "(${formatTotalTime(a["totalMinutes"])} )",
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: (a["totalMinutes"] == null ||
-                                  a["totalMinutes"] <= 0)
-                                  ? Colors.red
-                                  : Colors.green,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Chip(
-                        label: Text(statusInfo["text"]),
-                        backgroundColor: statusInfo["color"]
-                            .withOpacity(0.1),
-                        labelStyle: TextStyle(
-                          color: statusInfo["color"],
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize:
-                        MaterialTapTargetSize.shrinkWrap,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 0),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
+                  // Date and Status Row
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        "${formatTime(a["checkInTime"])} - ${formatTime(a["checkOutTime"])}",
-                        style: const TextStyle(fontSize: 13),
+                        formatDate(a["workDate"]),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: statusInfo["color"].withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: statusInfo["color"],
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              statusInfo["icon"],
+                              color: statusInfo["color"],
+                              size: 16,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              statusInfo["text"],
+                              style: TextStyle(
+                                color: statusInfo["color"],
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
 
+                  // Overtime and Deduction Info
+                  if (a["overtimeHours"] != null && a["overtimeHours"] > 0 ||
+                      a["deductionHours"] != null && a["deductionHours"] > 0) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        if (a["overtimeHours"] != null && a["overtimeHours"] > 0) ...[
+                          Icon(Icons.add_circle_outline,
+                              size: 16, color: Colors.green.shade700),
+                          const SizedBox(width: 4),
+                          Text(
+                            "OT: ${a["overtimeHours"]}h",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.green.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                        ],
+                        if (a["deductionHours"] != null && a["deductionHours"] > 0) ...[
+                          Icon(Icons.remove_circle_outline,
+                              size: 16, color: Colors.red.shade700),
+                          const SizedBox(width: 4),
+                          Text(
+                            "Deduction: ${a["deductionHours"]}h",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+
+                  // Reasons (if available)
+                  if (a["overtimeReason"] != null &&
+                      a["overtimeReason"].toString().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            "OT: ${a["overtimeReason"]}",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                              fontStyle: FontStyle.italic,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (a["deductionReason"] != null &&
+                      a["deductionReason"].toString().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            "Deduction: ${a["deductionReason"]}",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                              fontStyle: FontStyle.italic,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
+                  // Legacy check-in/check-out times (if available)
+                  if (a["checkInTime"] != null || a["checkOutTime"] != null) ...[
+                    const SizedBox(height: 8),
+                    const Divider(height: 1),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
+                        const SizedBox(width: 4),
+                        Text(
+                          "${formatTime(a["checkInTime"])} - ${formatTime(a["checkOutTime"])}",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        if (a["totalMinutes"] != null && a["totalMinutes"] > 0) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            "(${formatTotalTime(a["totalMinutes"])})",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),

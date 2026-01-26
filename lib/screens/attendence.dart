@@ -4,7 +4,6 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/pin_storage.dart';
-import '../widgets/primary_button.dart';
 import '../screens/my_attendance.dart';
 
 class AttendanceScreen extends StatefulWidget {
@@ -15,11 +14,11 @@ class AttendanceScreen extends StatefulWidget {
 }
 
 class _AttendanceScreenState extends State<AttendanceScreen> {
-  bool hasStartedWork = false;
+  bool isWorking = false; // Changed from hasStartedWork to isWorking
   bool loading = true;
   bool submitting = false;
   String? token;
-  DateTime? _lastCheckInTime;
+  String workStatus = 'NOT_WORKING'; // NEW: WORKING or NOT_WORKING
 
   // Controllers for overtime and deduction
   final _overtimeController = TextEditingController();
@@ -76,10 +75,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         final data = jsonDecode(res.body);
         print("DEBUG Attendance today data: $data");
         setState(() {
-          hasStartedWork = data["status"] == "CHECKED_IN";
-          if (data["checkInTime"] != null) {
-            _lastCheckInTime = DateTime.parse(data["checkInTime"]).toLocal();
-          }
+          // Load work status
+          workStatus = data["status"] ?? "NOT_WORKING";
+          isWorking = (workStatus == "WORKING");
 
           // Load existing overtime/deduction values
           final overtime = data["overtimeHours"];
@@ -95,7 +93,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           _overtimeReasonController.text = data["overtimeReason"] ?? '';
           _deductionReasonController.text = data["deductionReason"] ?? '';
 
-          print("DEBUG Loaded overtime: $overtime, deduction: $deduction");
+          print("DEBUG Loaded status: $workStatus, overtime: $overtime, deduction: $deduction");
         });
       } else if (res.statusCode == 404) {
         print("DEBUG No attendance record found for today");
@@ -111,50 +109,31 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
-  bool _checkInAllowed(TimeOfDay t) {
-    final m = t.hour * 60 + t.minute;
-    return m >= 375 && m <= 1170; // 6:15 AM – 7:30 PM
-  }
-
-  bool _checkOutAllowed(TimeOfDay t) {
-    final m = t.hour * 60 + t.minute;
-    return m <= 1230; // until 8:30 PM
-  }
-
-  /// ----------------- CHECK-IN -----------------
-  Future<void> startWork({DateTime? manualTime}) async {
-    if (submitting || hasStartedWork) {
-      _msg("You have already checked in today");
-      return;
-    }
-
-    final now = manualTime ?? DateTime.now();
-    if (!_checkInAllowed(TimeOfDay.fromDateTime(now))) {
-      _msg("Check-in allowed 6:15 AM – 7:30 PM");
-      return;
-    }
+  /// ----------------- TOGGLE WORK STATUS -----------------
+  Future<void> _toggleWorkStatus(String newStatus) async {
+    if (submitting) return;
 
     setState(() => submitting = true);
 
     try {
       final res = await http.post(
-        Uri.parse("$baseUrl/check-in"),
+        Uri.parse("$baseUrl/mark-status"),
         headers: {
           "Authorization": "Bearer $token",
           "Content-Type": "application/json"
         },
-        body: jsonEncode({"checkInTime": now.toUtc().toIso8601String()}),
+        body: jsonEncode({"status": newStatus}),
       );
 
       if (res.statusCode == 200) {
         setState(() {
-          hasStartedWork = true;
-          _lastCheckInTime = now;
+          workStatus = newStatus;
+          isWorking = (newStatus == "WORKING");
         });
-        _msg(manualTime != null ? "Manual check-in saved" : "Checked in successfully");
+        _msg("Status updated to ${newStatus == 'WORKING' ? 'Working' : 'Not Working'}");
       } else {
         final body = jsonDecode(res.body);
-        _msg(body["message"] ?? "Check-in failed");
+        _msg(body["message"] ?? "Failed to update status");
       }
     } catch (e) {
       _msg("Unable to connect to server: $e");
@@ -163,64 +142,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  Future<void> _pickManualCheckIn() async {
-    final t = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-    if (t != null) {
-      final now = DateTime.now();
-      final manualTime = DateTime(now.year, now.month, now.day, t.hour, t.minute);
-      await startWork(manualTime: manualTime);
-    }
-  }
-
-  /// ----------------- CHECK-OUT -----------------
-  Future<void> endWork({DateTime? manualTime}) async {
-    if (submitting || !hasStartedWork) return;
-
-    final now = manualTime ?? DateTime.now();
-    if (!_checkOutAllowed(TimeOfDay.fromDateTime(now))) {
-      _msg("Checkout allowed until 8:30 PM");
-      return;
-    }
-
-    if (_lastCheckInTime != null && !now.isAfter(_lastCheckInTime!)) {
-      _msg("Checkout must be after check-in");
-      return;
-    }
-
-    setState(() => submitting = true);
-
-    try {
-      final res = await http.post(
-        Uri.parse("$baseUrl/check-out"),
-        headers: {
-          "Authorization": "Bearer $token",
-          "Content-Type": "application/json"
-        },
-        body: jsonEncode({"checkOutTime": now.toUtc().toIso8601String()}),
-      );
-
-      if (res.statusCode == 200) {
-        setState(() => hasStartedWork = false);
-        _msg(manualTime != null ? "Manual checkout saved" : "Checked out successfully");
-      } else {
-        final body = jsonDecode(res.body);
-        _msg(body["message"] ?? "Checkout failed");
-      }
-    } catch (e) {
-      _msg("Unable to connect to server: $e");
-    } finally {
-      setState(() => submitting = false);
-    }
-  }
-
-  Future<void> _pickManualCheckOut() async {
-    final t = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-    if (t != null) {
-      final now = DateTime.now();
-      final manualTime = DateTime(now.year, now.month, now.day, t.hour, t.minute);
-      await endWork(manualTime: manualTime);
-    }
-  }
 
   /// ----------------- UI -----------------
   @override
@@ -252,56 +173,117 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            if (_lastCheckInTime != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+            // ===== QUESTION =====
+            const Text(
+              "Are you working today?",
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // ===== YES/NO BUTTONS =====
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: submitting
+                        ? null
+                        : () => _toggleWorkStatus("WORKING"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isWorking ? Colors.green.shade700 : Colors.green.shade400,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: isWorking ? 6 : 2,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.check, size: 24),
+                        const SizedBox(width: 8),
+                        const Text(
+                          "YES",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: submitting
+                        ? null
+                        : () => _toggleWorkStatus("NOT_WORKING"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: !isWorking ? Colors.red.shade700 : Colors.red.shade400,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: !isWorking ? 6 : 2,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.close, size: 24),
+                        const SizedBox(width: 8),
+                        const Text(
+                          "NO",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            // Current status indicator
+            if (isWorking || workStatus == "NOT_WORKING") ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isWorking ? Colors.green.shade50 : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isWorking ? Colors.green.shade300 : Colors.grey.shade300,
+                  ),
+                ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.access_time, size: 20),
+                    Icon(
+                      isWorking ? Icons.check_circle : Icons.cancel,
+                      color: isWorking ? Colors.green.shade700 : Colors.grey.shade600,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Text(
-                      "Checked in at: ${TimeOfDay.fromDateTime(_lastCheckInTime!).format(context)}",
-                      style: const TextStyle(fontSize: 16),
+                      isWorking ? "Status: Working" : "Status: Not Working",
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: isWorking ? Colors.green.shade700 : Colors.grey.shade700,
+                      ),
                     ),
                   ],
                 ),
               ),
-            // ===== CHECK-IN ROW =====
-            Row(
-              children: [
-                Expanded(
-                  child: PrimaryButton(
-                    text: "Check In",
-                    onPressed: (!hasStartedWork && !submitting) ? () => startWork() : null,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.schedule),
-                  tooltip: "Manual Check In",
-                  onPressed: (!hasStartedWork && !submitting) ? _pickManualCheckIn : null,
-                ),
-              ],
-            ),
+            ],
             const SizedBox(height: 24),
-            // ===== CHECK-OUT ROW =====
-            Row(
-              children: [
-                Expanded(
-                  child: PrimaryButton(
-                    text: "Check Out",
-                    onPressed: (hasStartedWork && !submitting) ? () => endWork() : null,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.schedule),
-                  tooltip: "Manual Check Out",
-                  onPressed: (hasStartedWork && !submitting) ? _pickManualCheckOut : null,
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
 
             // ===== OVERTIME & DEDUCTION SECTION =====
             Expanded(
@@ -309,33 +291,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header with refresh
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "Today's Adjustments",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.refresh),
-                          onPressed: _loadStatus,
-                          tooltip: 'Refresh saved values',
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "Add overtime or deduction hours for today",
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
 
                     // OVERTIME SECTION
                     Container(
@@ -481,36 +436,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final overtime = double.tryParse(_overtimeController.text) ?? 0;
     final deduction = double.tryParse(_deductionController.text) ?? 0;
 
-    if (overtime == 0 && deduction == 0) {
-      _msg("Please enter overtime or deduction hours");
+    if (overtime < 0 || deduction < 0) {
+      _msg("Hours cannot be negative");
       return;
     }
 
     setState(() => submitting = true);
 
     try {
-      // First get today's attendance ID
-      final res = await http.get(
-        Uri.parse("$baseUrl/today"),
-        headers: {"Authorization": "Bearer $token"},
-      );
-
-      if (res.statusCode != 200) {
-        _msg("Could not fetch today's attendance");
-        return;
-      }
-
-      final data = jsonDecode(res.body);
-      final attendanceId = data['id'];
-
-      if (attendanceId == null) {
-        _msg("No attendance record found for today");
-        return;
-      }
-
-      // Save adjustments
-      final adjustRes = await http.put(
-        Uri.parse("$baseUrl/$attendanceId/adjustments"),
+      final res = await http.post(
+        Uri.parse("$baseUrl/save-adjustments"),
         headers: {
           "Authorization": "Bearer $token",
           "Content-Type": "application/json"
@@ -523,12 +458,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }),
       );
 
-      if (adjustRes.statusCode == 200) {
+      if (res.statusCode == 200) {
         _msg("Adjustments saved successfully ✓");
         // Reload to show saved values
         await _loadStatus();
       } else {
-        _msg("Failed to save adjustments: ${adjustRes.body}");
+        final body = res.body.isNotEmpty ? jsonDecode(res.body) : {};
+        _msg(body["message"] ?? "Failed to save adjustments");
       }
     } catch (e) {
       _msg("Error saving adjustments: $e");

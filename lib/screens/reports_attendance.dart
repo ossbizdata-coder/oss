@@ -70,7 +70,9 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
       }
 
       try {
-        users = List<Map<String, dynamic>>.from(jsonDecode(usersRes.body));
+        final allUsers = List<Map<String, dynamic>>.from(jsonDecode(usersRes.body));
+        // Filter to show only ADMIN users
+        users = allUsers.where((user) => user['role'] == 'ADMIN').toList();
       } catch (e) {
         setState(() {
           error = "Failed to parse users data: $e";
@@ -266,7 +268,7 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
                   checkOut: checkOut,
                   totalMinutes: totalMinutes,
                   status: status,
-                  manual: att['manual'] == true,
+                  manual: att['manualCheckout'] == true,
                   attendanceData: att,
                   userName: user['name'] ?? 'N/A',
                 );
@@ -296,20 +298,36 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
 
     final overtimeHours = (attendanceData['overtimeHours'] ?? 0).toDouble();
     final deductionHours = (attendanceData['deductionHours'] ?? 0).toDouble();
+    final overtimeReason = attendanceData['overtimeReason']?.toString() ?? '';
+    final deductionReason = attendanceData['deductionReason']?.toString() ?? '';
 
-    // Determine status text & color
+    // Determine status text, color, and icon based on new system
     String displayStatus;
     Color statusColor;
+    IconData statusIcon;
 
-    if (manual) {
-      displayStatus = 'MANUAL';
-      statusColor = Colors.orange.shade800;
-    } else if (status != null && status == 'COMPLETED') {
+    if (status == 'WORKING') {
+      displayStatus = 'WORKING';
+      statusColor = Colors.green.shade700;
+      statusIcon = Icons.check_circle;
+    } else if (status == 'NOT_WORKING') {
+      displayStatus = 'NOT WORKING';
+      statusColor = Colors.grey.shade600;
+      statusIcon = Icons.cancel;
+    } else if (status == 'COMPLETED') {
+      // Legacy status from old system
       displayStatus = 'COMPLETED';
-      statusColor = Colors.green.shade800;
+      statusColor = Colors.blue.shade700;
+      statusIcon = Icons.check_circle_outline;
+    } else if (status == 'CHECKED_IN') {
+      // Legacy status from old system
+      displayStatus = 'CHECKED IN';
+      statusColor = Colors.orange.shade700;
+      statusIcon = Icons.access_time;
     } else {
-      displayStatus = 'PENDING';
-      statusColor = Colors.red;
+      displayStatus = 'NO RECORD';
+      statusColor = Colors.red.shade700;
+      statusIcon = Icons.error_outline;
     }
 
     return Container(
@@ -318,9 +336,15 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFFF7F9FB),
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: statusColor.withOpacity(0.2),
+          width: 1,
+        ),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Date and Status Row
           Row(
             children: [
               Icon(Icons.calendar_today, size: 18, color: primary),
@@ -331,40 +355,42 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
                   children: [
                     Text(
                       date != null ? dateFmt.format(date) : 'Unknown date',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${checkIn != null ? timeFmt.format(checkIn) : 'N/A'}'
-                          ' • ${checkOut != null ? timeFmt.format(checkOut) : 'N/A'}',
-                      style: TextStyle(
-                        color: Colors.grey.shade700,
-                        fontSize: 13,
-                      ),
-                    ),
-                    if (minutesToShow != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          '${formatDuration(minutesToShow)}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.blueAccent,
-                          ),
-                        ),
-                      ),
-                    Text(
-                      displayStatus,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: statusColor,
+                      style: const TextStyle(
                         fontWeight: FontWeight.w600,
+                        fontSize: 15,
                       ),
                     ),
                   ],
                 ),
               ),
+              // Status Badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: statusColor,
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 14, color: statusColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      displayStatus,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: statusColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
               // Edit button
               IconButton(
                 icon: const Icon(Icons.edit, size: 20),
@@ -380,56 +406,142 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
                     ),
                   );
                 },
-                tooltip: 'Add overtime/deduction',
+                tooltip: 'Edit attendance',
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(8),
               ),
             ],
           ),
 
-          // Show overtime/deduction badges
+          // Overtime and Deduction Info
           if (overtimeHours > 0 || deductionHours > 0) ...[
-            const SizedBox(height: 8),
-            Row(
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 if (overtimeHours > 0)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.shade200),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.add_circle_outline, size: 12, color: Colors.green.shade700),
+                        Icon(Icons.add_circle_outline, size: 14, color: Colors.green.shade700),
                         const SizedBox(width: 4),
                         Text(
                           'OT: ${overtimeHours.toStringAsFixed(1)}h',
-                          style: TextStyle(fontSize: 11, color: Colors.green.shade700),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.green.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                if (overtimeHours > 0 && deductionHours > 0)
-                  const SizedBox(width: 8),
                 if (deductionHours > 0)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.shade200),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.remove_circle_outline, size: 12, color: Colors.red.shade700),
+                        Icon(Icons.remove_circle_outline, size: 14, color: Colors.red.shade700),
                         const SizedBox(width: 4),
                         Text(
                           'Deduct: ${deductionHours.toStringAsFixed(1)}h',
-                          style: TextStyle(fontSize: 11, color: Colors.red.shade700),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.red.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
                   ),
+              ],
+            ),
+          ],
+
+          // Reasons
+          if (overtimeReason.isNotEmpty || deductionReason.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            if (overtimeReason.isNotEmpty)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'OT: $overtimeReason',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            if (deductionReason.isNotEmpty) ...[
+              if (overtimeReason.isNotEmpty) const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Deduction: $deductionReason',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+
+          // Legacy check-in/check-out times (only show if available)
+          if (checkIn != null || checkOut != null) ...[
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
+                const SizedBox(width: 6),
+                Text(
+                  '${checkIn != null ? timeFmt.format(checkIn) : 'N/A'} - ${checkOut != null ? timeFmt.format(checkOut) : 'N/A'}',
+                  style: TextStyle(
+                    color: Colors.grey.shade700,
+                    fontSize: 12,
+                  ),
+                ),
+                if (minutesToShow != null) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '(${formatDuration(minutesToShow)})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
               ],
             ),
           ],

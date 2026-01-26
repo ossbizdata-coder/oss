@@ -18,6 +18,7 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
   int selectedMonth = DateTime.now().month;
 
   double dailySalary = 0;
+  double hourlyRate = 0;
   double deductionRatePerHour = 0;
   int totalDaysWorked = 0;
   double totalSalary = 0;
@@ -32,43 +33,72 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
   Future<void> fetchSalary() async {
     setState(() {
       loading = true;
-      daily = [];          // ✅ CLEAR OLD MONTH DATA
+      daily = [];
       totalSalary = 0;
       totalDaysWorked = 0;
+      dailySalary = 0;
+      hourlyRate = 0;
+      deductionRatePerHour = 0;
     });
 
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString("token");
 
-    final res = await http.get(
-      Uri.parse(
-        "http://74.208.132.78/api/salary/me/monthly"
-            "?year=$selectedYear&month=$selectedMonth",
-      ),
-      headers: {
-        "Authorization": "Bearer $token",
-        "Content-Type": "application/json",
-      },
-    );
+    if (token == null) {
+      if (mounted) Navigator.pushReplacementNamed(context, "/login");
+      return;
+    }
 
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-      print("DEBUG Salary Response: $data");
-      setState(() {
-        dailySalary = (data["dailySalary"] ?? 0).toDouble();
-        deductionRatePerHour = (data["deductionRatePerHour"] ?? 0).toDouble();
-        totalDaysWorked = (data["totalDaysWorked"] ?? 0).toInt();
-        totalSalary = (data["totalSalary"] ?? 0).toDouble();
-        daily = List.from(data["dailyBreakdown"] ?? [])
-          ..sort((a, b) =>
-              DateTime.parse(b["date"])
-                  .compareTo(DateTime.parse(a["date"])));
-        loading = false;
-      });
-      print("DEBUG dailySalary: $dailySalary, deductionRate: $deductionRatePerHour");
-    } else {
-      print("DEBUG Salary API Error: ${res.statusCode} - ${res.body}");
-      setState(() => loading = false);
+    try {
+      final res = await http.get(
+        Uri.parse(
+          "http://74.208.132.78/api/salary/me/monthly"
+              "?year=$selectedYear&month=$selectedMonth",
+        ),
+        headers: {
+          "Authorization": "Bearer $token",
+          "Content-Type": "application/json",
+        },
+      );
+
+      print("DEBUG Salary API: ${res.statusCode}");
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        print("DEBUG Salary Response: $data");
+
+        if (mounted) {
+          setState(() {
+            dailySalary = (data["dailySalary"] ?? 0).toDouble();
+            hourlyRate = (data["hourlyRate"] ?? 0).toDouble();
+            deductionRatePerHour = (data["deductionRatePerHour"] ?? 0).toDouble();
+            totalDaysWorked = (data["totalDaysWorked"] ?? 0).toInt();
+            totalSalary = (data["totalSalary"] ?? 0).toDouble();
+            daily = List.from(data["dailyBreakdown"] ?? [])
+              ..sort((a, b) =>
+                  DateTime.parse(b["date"])
+                      .compareTo(DateTime.parse(a["date"])));
+            loading = false;
+          });
+        }
+        print("DEBUG dailySalary: $dailySalary, hourlyRate: $hourlyRate, deductionRate: $deductionRatePerHour");
+      } else {
+        print("DEBUG Salary API Error: ${res.statusCode} - ${res.body}");
+        if (mounted) {
+          setState(() => loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Failed to load salary data: ${res.statusCode}")),
+          );
+        }
+      }
+    } catch (e) {
+      print("DEBUG Salary API Exception: $e");
+      if (mounted) {
+        setState(() => loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error loading salary: $e")),
+        );
+      }
     }
   }
 
@@ -151,7 +181,10 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                 children: [
                   const Text(
                     "Total Salary",
-                    style: TextStyle(color: Colors.white70),
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -162,20 +195,59 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "$totalDaysWorked days • Rs ${dailySalary.toStringAsFixed(0)}/day",
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      "Deduction rate: Rs ${deductionRatePerHour.toStringAsFixed(0)}/hr",
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 12,
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today, size: 14, color: Colors.white70),
+                      const SizedBox(width: 6),
+                      Text(
+                        "$totalDaysWorked working days",
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                        ),
                       ),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.payments, size: 14, color: Colors.white70),
+                      const SizedBox(width: 6),
+                      Text(
+                        "Daily: Rs ${dailySalary.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.add_circle_outline, size: 14, color: Colors.greenAccent),
+                      const SizedBox(width: 6),
+                      Text(
+                        "Overtime: Rs ${hourlyRate.toStringAsFixed(0)}/hr",
+                        style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(Icons.remove_circle_outline, size: 14, color: Colors.redAccent),
+                      const SizedBox(width: 6),
+                      Text(
+                        "Deduction: Rs ${deductionRatePerHour.toStringAsFixed(0)}/hr",
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -200,33 +272,33 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                   final d = daily[index];
                   print("DEBUG Daily item $index: $d");
 
-                  // Check if overtime/deduction fields exist
-                  final hasOvertimeFields = d.containsKey("overtimeHours") &&
-                                           d.containsKey("deductionHours");
-
-                  if (!hasOvertimeFields && index == 0) {
-                    print("⚠️ WARNING: Backend not returning overtime/deduction fields!");
-                    print("⚠️ dailyBreakdown items should include: overtimeHours, deductionHours, overtimeReason, deductionReason");
-                  }
-
                   final date = DateFormat.yMMMd()
                       .format(DateTime.parse(d["date"]));
-                  final hours = (d["hours"] ?? 0).toDouble();
+                  final status = d["status"] ?? "UNKNOWN";
                   final salary = (d["salary"] ?? 0).toDouble();
                   final overtime = (d["overtimeHours"] ?? 0).toDouble();
                   final deduction = (d["deductionHours"] ?? 0).toDouble();
                   final overtimeReason = d["overtimeReason"];
                   final deductionReason = d["deductionReason"];
-                  print("DEBUG Overtime: $overtime, Deduction: $deduction");
+
+                  // Determine status display
+                  bool isWorking = status == "WORKING";
+                  Color statusColor = isWorking ? Colors.green : Colors.red;
+                  IconData statusIcon = isWorking ? Icons.check_circle : Icons.cancel;
+                  String statusText = isWorking ? "WORKED" : "DID NOT WORK";
 
                   return Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: statusColor.withOpacity(0.2),
+                        width: 1.5,
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withAlpha((Colors.black.a * 0.05).toInt()),
+                          color: Colors.black.withOpacity(0.05),
                           blurRadius: 8,
                           offset: const Offset(0, 4),
                         ),
@@ -251,108 +323,122 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                                       fontSize: 15,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "${hours.toStringAsFixed(1)} hrs worked",
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  // Show daily rate - ALWAYS VISIBLE FOR DEBUGGING
+                                  const SizedBox(height: 6),
+                                  // Status badge
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
+                                      horizontal: 8,
+                                      vertical: 4,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.blue.shade50,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      "Base: Rs ${dailySalary.toStringAsFixed(0)}/day",
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.blue.shade700,
-                                        fontWeight: FontWeight.w600,
+                                      color: statusColor.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: statusColor,
+                                        width: 1,
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  // Show deduction rate - ALWAYS VISIBLE FOR DEBUGGING
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange.shade50,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      "OT/Deduct: Rs ${deductionRatePerHour.toStringAsFixed(0)}/hr",
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.orange.shade700,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          statusIcon,
+                                          size: 14,
+                                          color: statusColor,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          statusText,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: statusColor,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
                             ),
                             const SizedBox(width: 12),
-                            Text(
-                              "Rs ${salary.toStringAsFixed(2)}",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  "Rs ${salary.toStringAsFixed(2)}",
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                                if (isWorking)
+                                  Text(
+                                    "Base: Rs ${dailySalary.toStringAsFixed(0)}",
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
 
                         // Show overtime if any
                         if (overtime > 0) ...[
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 10),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
+                            padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
                               color: Colors.green.shade50,
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green.shade200),
                             ),
                             child: Row(
-                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   Icons.add_circle_outline,
-                                  size: 14,
+                                  size: 16,
                                   color: Colors.green.shade700,
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  "Overtime: ${overtime.toStringAsFixed(1)} hrs",
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.green.shade700,
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        "Overtime: ${overtime.toStringAsFixed(1)} hrs × Rs ${hourlyRate.toStringAsFixed(0)}",
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.green.shade700,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (overtimeReason != null &&
+                                          overtimeReason.toString().isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          overtimeReason,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.green.shade600,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
-                                if (overtimeReason != null && overtimeReason.toString().isNotEmpty) ...[
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    "($overtimeReason)",
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.green.shade600,
-                                      fontStyle: FontStyle.italic,
-                                    ),
+                                Text(
+                                  "+Rs ${(overtime * hourlyRate).toStringAsFixed(2)}",
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.green.shade700,
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                ],
+                                ),
                               ],
                             ),
                           ),
@@ -362,41 +448,55 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                         if (deduction > 0) ...[
                           const SizedBox(height: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
+                            padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
                               color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.shade200),
                             ),
                             child: Row(
-                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   Icons.remove_circle_outline,
-                                  size: 14,
+                                  size: 16,
                                   color: Colors.red.shade700,
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  "Deduction: ${deduction.toStringAsFixed(1)} hrs",
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.red.shade700,
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        "Deduction: ${deduction.toStringAsFixed(1)} hrs × Rs ${deductionRatePerHour.toStringAsFixed(0)}",
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.red.shade700,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (deductionReason != null &&
+                                          deductionReason.toString().isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          deductionReason,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.red.shade600,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
-                                if (deductionReason != null && deductionReason.toString().isNotEmpty) ...[
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    "($deductionReason)",
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.red.shade600,
-                                      fontStyle: FontStyle.italic,
-                                    ),
+                                Text(
+                                  "-Rs ${(deduction * deductionRatePerHour).toStringAsFixed(2)}",
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.red.shade700,
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                ],
+                                ),
                               ],
                             ),
                           ),
