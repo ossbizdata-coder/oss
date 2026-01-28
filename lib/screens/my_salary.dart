@@ -21,8 +21,11 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
   double hourlyRate = 0;
   double deductionRatePerHour = 0;
   int totalDaysWorked = 0;
-  double totalSalary = 0;
+  double baseSalary = 0; // Salary before credits
+  double totalCredits = 0; // Total credits to deduct
+  double totalSalary = 0; // Final salary after credits
   List<dynamic> daily = [];
+  List<dynamic> creditsBreakdown = []; // Credits by shop type
 
   @override
   void initState() {
@@ -30,10 +33,58 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
     fetchSalary();
   }
 
+  Future<void> fetchCreditsBreakdown() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString("token");
+
+    if (token == null) return;
+
+    try {
+      final res = await http.get(
+        Uri.parse(
+          "http://74.208.132.78/api/credits/me/breakdown"
+              "?year=$selectedYear&month=$selectedMonth",
+        ),
+        headers: {
+          "Authorization": "Bearer $token",
+          "Content-Type": "application/json",
+        },
+      );
+
+      print("DEBUG Credits Breakdown API: ${res.statusCode}");
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        print("DEBUG Credits Breakdown Response: $data");
+
+        if (mounted) {
+          setState(() {
+            creditsBreakdown = List.from(data ?? []);
+          });
+        }
+      } else {
+        print("DEBUG Credits Breakdown API Error: ${res.statusCode} - ${res.body}");
+        // If endpoint doesn't exist, just continue without credits breakdown
+        if (mounted) {
+          setState(() => creditsBreakdown = []);
+        }
+      }
+    } catch (e) {
+      print("DEBUG Credits Breakdown API Exception: $e");
+      // Fail silently - credits breakdown is optional
+      if (mounted) {
+        setState(() => creditsBreakdown = []);
+      }
+    }
+  }
+
   Future<void> fetchSalary() async {
     setState(() {
       loading = true;
       daily = [];
+      creditsBreakdown = [];
+      baseSalary = 0;
+      totalCredits = 0;
       totalSalary = 0;
       totalDaysWorked = 0;
       dailySalary = 0;
@@ -73,7 +124,20 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
             hourlyRate = (data["hourlyRate"] ?? 0).toDouble();
             deductionRatePerHour = (data["deductionRatePerHour"] ?? 0).toDouble();
             totalDaysWorked = (data["totalDaysWorked"] ?? 0).toInt();
-            totalSalary = (data["totalSalary"] ?? 0).toDouble();
+
+            // Handle new credits integration (backward compatible)
+            if (data.containsKey("baseSalary")) {
+              // New API with credits
+              baseSalary = (data["baseSalary"] ?? 0).toDouble();
+              totalCredits = (data["totalCredits"] ?? 0).toDouble();
+              totalSalary = (data["totalSalary"] ?? 0).toDouble();
+            } else {
+              // Old API without credits
+              baseSalary = (data["totalSalary"] ?? 0).toDouble();
+              totalCredits = 0;
+              totalSalary = baseSalary;
+            }
+
             daily = List.from(data["dailyBreakdown"] ?? [])
               ..sort((a, b) =>
                   DateTime.parse(b["date"])
@@ -82,6 +146,12 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
           });
         }
         print("DEBUG dailySalary: $dailySalary, hourlyRate: $hourlyRate, deductionRate: $deductionRatePerHour");
+        print("DEBUG baseSalary: $baseSalary, totalCredits: $totalCredits, finalSalary: $totalSalary");
+
+        // Fetch credits breakdown if user has credits
+        if (totalCredits > 0) {
+          await fetchCreditsBreakdown();
+        }
       } else {
         print("DEBUG Salary API Error: ${res.statusCode} - ${res.body}");
         if (mounted) {
@@ -180,7 +250,7 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Total Salary",
+                    "Monthly Salary",
                     style: TextStyle(
                       color: Colors.white70,
                       fontSize: 14,
@@ -195,6 +265,62 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+
+                  // Show breakdown if credits exist
+                  if (totalCredits > 0) ...[
+                    const SizedBox(height: 12),
+                    const Divider(color: Colors.white30),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "Base Salary",
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                          ),
+                        ),
+                        Text(
+                          "Rs ${baseSalary.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.remove_circle_outline, size: 14, color: Colors.redAccent),
+                            const SizedBox(width: 6),
+                            const Text(
+                              "Credits",
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          "- Rs ${totalCredits.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -253,7 +379,187 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
               ),
             ),
 
+            const SizedBox(height: 16),
+
+            // CREDITS BREAKDOWN by shop type
+            if (totalCredits > 0)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.credit_card, color: Colors.red.shade700, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Credits Breakdown",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Show breakdown by shop type if available
+                    if (creditsBreakdown.isNotEmpty)
+                      ...creditsBreakdown.map((credit) {
+                        final shopType = credit["shopType"] ?? "Unknown";
+                        final amount = (credit["totalAmount"] ?? 0).toDouble();
+                        final count = credit["count"] ?? 0;
+
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.shade400,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        "$shopType ($count transaction${count > 1 ? 's' : ''})",
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.red.shade800,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Text(
+                                "Rs ${amount.toStringAsFixed(2)}",
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.red.shade900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList()
+                    else
+                      // Show total credits if breakdown not available
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Total Credits",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.red.shade800,
+                            ),
+                          ),
+                          Text(
+                            "Rs ${totalCredits.toStringAsFixed(2)}",
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.red.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                    // Total row if breakdown exists
+                    if (creditsBreakdown.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Divider(color: Colors.red),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Total Credits",
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade900,
+                            ),
+                          ),
+                          Text(
+                            "Rs ${totalCredits.toStringAsFixed(2)}",
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
             const SizedBox(height: 24),
+
+            // INFO MESSAGE when no salary
+            if (totalSalary == 0 && totalDaysWorked == 0)
+              Container(
+                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue.shade700, size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "How to earn salary",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Colors.blue.shade900,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            "• Check in when you start work\n"
+                            "• Work at least 6 hours to qualify for daily salary (Rs ${dailySalary.toStringAsFixed(0)})\n"
+                            "• Check out when you finish work\n"
+                            "• Overtime hours will add bonus pay\n"
+                            "• Your salary will appear here once you complete qualified work days",
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.5,
+                              color: Colors.blue.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
             // DAILY BREAKDOWN
             Expanded(
@@ -274,18 +580,21 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
 
                   final date = DateFormat.yMMMd()
                       .format(DateTime.parse(d["date"]));
-                  final status = d["status"] ?? "UNKNOWN";
+                  final status = d["status"] ?? "NOT_STARTED";
                   final salary = (d["salary"] ?? 0).toDouble();
                   final overtime = (d["overtimeHours"] ?? 0).toDouble();
                   final deduction = (d["deductionHours"] ?? 0).toDouble();
                   final overtimeReason = d["overtimeReason"];
                   final deductionReason = d["deductionReason"];
+                  final hoursWorked = (d["hours"] ?? 0).toDouble();
+                  final isQualified = d["qualified"] ?? false;
 
                   // Determine status display
-                  bool isWorking = status == "WORKING";
+                  bool isWorking = (status == "CHECKED_IN" || status == "COMPLETED");
+                  bool hasStatus = (status != "NOT_STARTED");
                   Color statusColor = isWorking ? Colors.green : Colors.red;
                   IconData statusIcon = isWorking ? Icons.check_circle : Icons.cancel;
-                  String statusText = isWorking ? "WORKED" : "DID NOT WORK";
+                  String statusText = isWorking ? "You are working today" : "You are not working today";
 
                   return Container(
                     padding: const EdgeInsets.all(16),
@@ -323,41 +632,89 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                                       fontSize: 15,
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
-                                  // Status badge
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: statusColor.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: statusColor,
-                                        width: 1,
+                                  // Only show status badge if user selected YES or NO
+                                  if (hasStatus) ...[
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: statusColor.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: statusColor,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            statusIcon,
+                                            size: 14,
+                                            color: statusColor,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            statusText,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: statusColor,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
+                                  ],
+                                  // Show hours worked and qualification
+                                  if (hoursWorked > 0 || status == "COMPLETED") ...[
+                                    const SizedBox(height: 6),
+                                    Row(
                                       children: [
                                         Icon(
-                                          statusIcon,
+                                          Icons.access_time,
                                           size: 14,
-                                          color: statusColor,
+                                          color: Colors.grey.shade600,
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          statusText,
+                                          "${hoursWorked.toStringAsFixed(1)} hours worked",
                                           style: TextStyle(
-                                            fontSize: 11,
-                                            color: statusColor,
-                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                            color: Colors.grey.shade700,
                                           ),
                                         ),
+                                        if (!isQualified && hoursWorked > 0) ...[
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange.shade50,
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(
+                                                color: Colors.orange.shade300,
+                                                width: 0.5,
+                                              ),
+                                            ),
+                                            child: Text(
+                                              "Not qualified (need 6h)",
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.orange.shade700,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
-                                  ),
+                                  ],
                                 ],
                               ),
                             ),

@@ -79,8 +79,24 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
 
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body);
+
+          // Parse new fields with backward compatibility
+          final totalSalary = (data['totalSalary'] is num)
+              ? data['totalSalary'].toDouble()
+              : double.tryParse(data['totalSalary']?.toString() ?? '') ?? 0.0;
+
+          final baseSalary = data.containsKey('baseSalary')
+              ? ((data['baseSalary'] is num) ? data['baseSalary'].toDouble() : double.tryParse(data['baseSalary']?.toString() ?? '') ?? 0.0)
+              : totalSalary; // Fallback to totalSalary if baseSalary not present
+
+          final totalCredits = data.containsKey('totalCredits')
+              ? ((data['totalCredits'] is num) ? data['totalCredits'].toDouble() : double.tryParse(data['totalCredits']?.toString() ?? '') ?? 0.0)
+              : 0.0;
+
           userSalary[userId] = {
-            'totalSalary': (data['totalSalary'] is num) ? data['totalSalary'].toDouble() : double.tryParse(data['totalSalary']?.toString() ?? '') ?? 0.0,
+            'baseSalary': baseSalary,
+            'totalCredits': totalCredits,
+            'totalSalary': totalSalary,
             'totalHours': (data['totalHours'] is num) ? data['totalHours'].toDouble() : double.tryParse(data['totalHours']?.toString() ?? '') ?? 0.0,
             'hourlyRate': (data['hourlyRate'] is num) ? data['hourlyRate'].toDouble() : double.tryParse(data['hourlyRate']?.toString() ?? '') ?? 0.0,
             'dailyBreakdown': (data['dailyBreakdown'] is List) ? data['dailyBreakdown'] : [],
@@ -239,7 +255,7 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Total Salary',
+                    'Total Salary (Final)',
                     style:
                     TextStyle(fontSize: 14, color: Colors.black54),
                   ),
@@ -251,6 +267,59 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+
+                  // Show breakdown if credits exist
+                  if ((salary['totalCredits'] ?? 0) > 0) ...[
+                    const SizedBox(height: 12),
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Base Salary',
+                          style: TextStyle(fontSize: 13, color: Colors.black87),
+                        ),
+                        Text(
+                          currency.format((salary['baseSalary'] ?? 0).toDouble()),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black87,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.remove_circle_outline, size: 14, color: Colors.red.shade700),
+                            const SizedBox(width: 4),
+                            const Text(
+                              'Credits',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.red,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          '- ${currency.format((salary['totalCredits'] ?? 0).toDouble())}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.red,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
                   const SizedBox(height: 12),
                   Row(
                     children: [

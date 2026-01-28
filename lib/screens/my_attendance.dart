@@ -37,26 +37,210 @@ class _MyAttendanceReportScreenState
   }
 
   Future<void> fetchAttendance() async {
-    final res = await http.get(
-      Uri.parse("http://74.208.132.78/api/attendance/history"),
-      headers: {
-        "Authorization": "Bearer $token",
-        "Content-Type": "application/json",
-      },
-    );
+    try {
+      print("DEBUG: Fetching attendance history...");
 
-    if (res.statusCode == 200) {
-      attendanceList = jsonDecode(res.body);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to load attendance")),
+      // Try the /history endpoint first
+      var res = await http.get(
+        Uri.parse("http://74.208.132.78/api/attendance/history"),
+        headers: {
+          "Authorization": "Bearer $token",
+          "Content-Type": "application/json",
+        },
       );
+
+      print("DEBUG: Attendance response status: ${res.statusCode}");
+
+      // If 403, the endpoint might not exist - show helpful message
+      if (res.statusCode == 403) {
+        print("DEBUG: 403 Forbidden - endpoint blocked or doesn't exist");
+        print("DEBUG: This usually means the backend endpoint needs to be implemented");
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Attendance history endpoint not available. Please contact administrator."),
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+        setState(() => attendanceList = []);
+        return;
+      }
+
+      print("DEBUG: Attendance response body: ${res.body}");
+
+      if (res.statusCode == 200) {
+        if (res.body.isEmpty || res.body == 'null') {
+          print("DEBUG: Empty response body");
+          setState(() => attendanceList = []);
+          return;
+        }
+
+        final decoded = jsonDecode(res.body);
+        print("DEBUG: Decoded data type: ${decoded.runtimeType}");
+
+        // Debug: Print first record structure if available
+        if (decoded is List && decoded.isNotEmpty) {
+          print("DEBUG: First record structure: ${decoded[0]}");
+          print("DEBUG: First record keys: ${(decoded[0] as Map).keys.toList()}");
+          print("DEBUG: overtimeHours value: ${decoded[0]['overtimeHours']}, type: ${decoded[0]['overtimeHours'].runtimeType}");
+          print("DEBUG: deductionHours value: ${decoded[0]['deductionHours']}, type: ${decoded[0]['deductionHours'].runtimeType}");
+        } else if (decoded is Map && decoded.containsKey('data')) {
+          final data = decoded['data'];
+          if (data is List && data.isNotEmpty) {
+            print("DEBUG: First record structure: ${data[0]}");
+            print("DEBUG: First record keys: ${(data[0] as Map).keys.toList()}");
+            print("DEBUG: overtimeHours value: ${data[0]['overtimeHours']}, type: ${data[0]['overtimeHours'].runtimeType}");
+            print("DEBUG: deductionHours value: ${data[0]['deductionHours']}, type: ${data[0]['deductionHours'].runtimeType}");
+          }
+        }
+
+        // Get today's date as timestamp (end of day)
+        final today = DateTime.now();
+        final todayEndOfDay = DateTime(today.year, today.month, today.day, 23, 59, 59);
+        final todayTimestamp = todayEndOfDay.millisecondsSinceEpoch;
+
+        if (decoded is List) {
+          // Filter records up to today only, then sort by workDate in descending order
+          final filtered = List<dynamic>.from(decoded).where((record) {
+            final workDate = record['workDate'];
+            if (workDate == null) return false;
+
+            // Handle both timestamp and ISO date string
+            int recordTimestamp;
+            if (workDate is int) {
+              recordTimestamp = workDate;
+            } else if (workDate is String) {
+              try {
+                // Try parsing as ISO date
+                recordTimestamp = DateTime.parse(workDate).millisecondsSinceEpoch;
+              } catch (e) {
+                // Try parsing as timestamp string
+                try {
+                  recordTimestamp = int.parse(workDate);
+                } catch (e2) {
+                  return false;
+                }
+              }
+            } else {
+              return false;
+            }
+
+            // Only include if workDate <= today
+            return recordTimestamp <= todayTimestamp;
+          }).toList();
+
+          filtered.sort((a, b) {
+            // Sort by workDate in descending order
+            final dateA = a['workDate'];
+            final dateB = b['workDate'];
+
+            // Handle comparison for both int and string
+            if (dateA is int && dateB is int) {
+              return dateB.compareTo(dateA);
+            } else if (dateA is String && dateB is String) {
+              return dateB.compareTo(dateA);
+            } else {
+              // Mixed types, convert to comparable format
+              return 0;
+            }
+          });
+          setState(() => attendanceList = filtered);
+          print("DEBUG: Loaded ${attendanceList.length} attendance records up to today (sorted DESC)");
+        } else if (decoded is Map && decoded.containsKey('data')) {
+          // Filter records up to today only, then sort by workDate in descending order
+          final filtered = List<dynamic>.from(decoded['data'] ?? []).where((record) {
+            final workDate = record['workDate'];
+            if (workDate == null) return false;
+
+            // Handle both timestamp and ISO date string
+            int recordTimestamp;
+            if (workDate is int) {
+              recordTimestamp = workDate;
+            } else if (workDate is String) {
+              try {
+                // Try parsing as ISO date
+                recordTimestamp = DateTime.parse(workDate).millisecondsSinceEpoch;
+              } catch (e) {
+                // Try parsing as timestamp string
+                try {
+                  recordTimestamp = int.parse(workDate);
+                } catch (e2) {
+                  return false;
+                }
+              }
+            } else {
+              return false;
+            }
+
+            // Only include if workDate <= today
+            return recordTimestamp <= todayTimestamp;
+          }).toList();
+
+          filtered.sort((a, b) {
+            // Sort by workDate in descending order
+            final dateA = a['workDate'];
+            final dateB = b['workDate'];
+
+            // Handle comparison for both int and string
+            if (dateA is int && dateB is int) {
+              return dateB.compareTo(dateA);
+            } else if (dateA is String && dateB is String) {
+              return dateB.compareTo(dateA);
+            } else {
+              // Mixed types, convert to comparable format
+              return 0;
+            }
+          });
+          setState(() => attendanceList = filtered);
+          print("DEBUG: Loaded ${attendanceList.length} attendance records from 'data' field up to today (sorted DESC)");
+        } else {
+          print("DEBUG: Unexpected response format: $decoded");
+          setState(() => attendanceList = []);
+        }
+      } else {
+        print("DEBUG: Failed with status ${res.statusCode}");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Failed to load attendance: ${res.statusCode}")),
+          );
+        }
+      }
+    } catch (e) {
+      print("DEBUG: Error fetching attendance: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error loading attendance: $e")),
+        );
+      }
     }
   }
 
-  // 📅 Date formatter
-  String formatDate(String isoDate) {
-    final d = DateTime.parse(isoDate).toLocal();
+  // 📅 Date formatter - handles both ISO date strings and timestamps
+  String formatDate(dynamic dateValue) {
+    DateTime d;
+
+    if (dateValue is int) {
+      // Handle timestamp in milliseconds
+      d = DateTime.fromMillisecondsSinceEpoch(dateValue).toLocal();
+    } else if (dateValue is String) {
+      // Try parsing as ISO date string first
+      try {
+        d = DateTime.parse(dateValue).toLocal();
+      } catch (e) {
+        // If parsing fails, try as timestamp string
+        try {
+          d = DateTime.fromMillisecondsSinceEpoch(int.parse(dateValue)).toLocal();
+        } catch (e2) {
+          print("DEBUG: Failed to parse date: $dateValue");
+          return dateValue.toString();
+        }
+      }
+    } else {
+      return dateValue.toString();
+    }
+
     return "${d.day.toString().padLeft(2, '0')}-"
         "${d.month.toString().padLeft(2, '0')}-"
         "${d.year}";
@@ -82,14 +266,16 @@ class _MyAttendanceReportScreenState
   }
 
   Map<String, dynamic> determineStatus(Map a) {
-    // Check for new status-based system first
+    // Check the status field from database
     final status = a["status"];
+    final checkIn = a["checkInTime"];
 
     String statusText;
     Color statusColor;
     IconData statusIcon;
 
-    if (status == "WORKING") {
+    // Check status field first (for records from database)
+    if (status == "WORKING" || status == "CHECKED_IN") {
       statusText = "WORKED";
       statusColor = Colors.green;
       statusIcon = Icons.check_circle;
@@ -97,24 +283,15 @@ class _MyAttendanceReportScreenState
       statusText = "DID NOT WORK";
       statusColor = Colors.red;
       statusIcon = Icons.cancel;
+    } else if (checkIn != null) {
+      // Fallback: If they checked in at all, they worked
+      statusText = "WORKED";
+      statusColor = Colors.green;
+      statusIcon = Icons.check_circle;
     } else {
-      // Fallback to old check-in/check-out system
-      final checkIn = a["checkInTime"];
-      final checkOut = a["checkOutTime"];
-
-      if (checkIn != null && checkOut != null) {
-        statusText = "COMPLETED";
-        statusColor = Colors.green;
-        statusIcon = Icons.check_circle;
-      } else if (checkIn != null && checkOut == null) {
-        statusText = "Checked In";
-        statusColor = Colors.orange;
-        statusIcon = Icons.access_time;
-      } else {
-        statusText = "No Record";
-        statusColor = Colors.red;
-        statusIcon = Icons.error_outline;
-      }
+      statusText = "DID NOT WORK";
+      statusColor = Colors.red;
+      statusIcon = Icons.cancel;
     }
 
     return {
@@ -132,14 +309,39 @@ class _MyAttendanceReportScreenState
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : attendanceList.isEmpty
-          ? const Center(child: Text("No attendance records found"))
-          : ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: attendanceList.length,
-        itemBuilder: (context, index) {
-          final a = attendanceList[index];
-          final statusInfo = determineStatus(a);
+          : RefreshIndicator(
+              onRefresh: () async {
+                await fetchAttendance();
+              },
+              child: attendanceList.isEmpty
+                  ? ListView(
+                      children: const [
+                        SizedBox(height: 200),
+                        Center(
+                          child: Column(
+                            children: [
+                              Icon(Icons.event_busy, size: 64, color: Colors.grey),
+                              SizedBox(height: 16),
+                              Text(
+                                "No attendance records found",
+                                style: TextStyle(fontSize: 16, color: Colors.grey),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                "Pull down to refresh",
+                                style: TextStyle(fontSize: 14, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: attendanceList.length,
+                      itemBuilder: (context, index) {
+                        final a = attendanceList[index];
+                        final statusInfo = determineStatus(a);
 
           return Card(
             elevation: 2,
@@ -155,13 +357,94 @@ class _MyAttendanceReportScreenState
                   // Date and Status Row
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        formatDate(a["workDate"]),
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            formatDate(a["workDate"]),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          // Show overtime and deduction hours under the date
+                          Builder(
+                            builder: (context) {
+                              // Safely parse overtime and deduction hours
+                              final overtimeHours = a["overtimeHours"];
+                              final deductionHours = a["deductionHours"];
+
+                              // Convert to double for comparison
+                              double? overtimeValue;
+                              double? deductionValue;
+
+                              if (overtimeHours != null) {
+                                if (overtimeHours is num) {
+                                  overtimeValue = overtimeHours.toDouble();
+                                } else if (overtimeHours is String) {
+                                  overtimeValue = double.tryParse(overtimeHours);
+                                }
+                              }
+
+                              if (deductionHours != null) {
+                                if (deductionHours is num) {
+                                  deductionValue = deductionHours.toDouble();
+                                } else if (deductionHours is String) {
+                                  deductionValue = double.tryParse(deductionHours);
+                                }
+                              }
+
+                              print("DEBUG: Record ${a["workDate"]} - OT: $overtimeValue, Deduction: $deductionValue");
+
+                              final hasOvertime = overtimeValue != null && overtimeValue > 0;
+                              final hasDeduction = deductionValue != null && deductionValue > 0;
+
+                              if (!hasOvertime && !hasDeduction) {
+                                return const SizedBox.shrink();
+                              }
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      if (hasOvertime) ...[
+                                        Icon(Icons.add_circle_outline,
+                                            size: 14, color: Colors.green.shade700),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          "${overtimeValue!.toStringAsFixed(1)}h OT",
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.green.shade700,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        if (hasDeduction) const SizedBox(width: 12),
+                                      ],
+                                      if (hasDeduction) ...[
+                                        Icon(Icons.remove_circle_outline,
+                                            size: 14, color: Colors.red.shade700),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          "${deductionValue!.toStringAsFixed(1)}h Off",
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.red.shade700,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ],
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -196,42 +479,6 @@ class _MyAttendanceReportScreenState
                     ],
                   ),
 
-                  // Overtime and Deduction Info
-                  if (a["overtimeHours"] != null && a["overtimeHours"] > 0 ||
-                      a["deductionHours"] != null && a["deductionHours"] > 0) ...[
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        if (a["overtimeHours"] != null && a["overtimeHours"] > 0) ...[
-                          Icon(Icons.add_circle_outline,
-                              size: 16, color: Colors.green.shade700),
-                          const SizedBox(width: 4),
-                          Text(
-                            "OT: ${a["overtimeHours"]}h",
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.green.shade700,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                        ],
-                        if (a["deductionHours"] != null && a["deductionHours"] > 0) ...[
-                          Icon(Icons.remove_circle_outline,
-                              size: 16, color: Colors.red.shade700),
-                          const SizedBox(width: 4),
-                          Text(
-                            "Deduction: ${a["deductionHours"]}h",
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.red.shade700,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
 
                   // Reasons (if available)
                   if (a["overtimeReason"] != null &&
@@ -276,43 +523,13 @@ class _MyAttendanceReportScreenState
                       ],
                     ),
                   ],
-
-                  // Legacy check-in/check-out times (if available)
-                  if (a["checkInTime"] != null || a["checkOutTime"] != null) ...[
-                    const SizedBox(height: 8),
-                    const Divider(height: 1),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
-                        const SizedBox(width: 4),
-                        Text(
-                          "${formatTime(a["checkInTime"])} - ${formatTime(a["checkOutTime"])}",
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade700,
-                          ),
-                        ),
-                        if (a["totalMinutes"] != null && a["totalMinutes"] > 0) ...[
-                          const SizedBox(width: 8),
-                          Text(
-                            "(${formatTotalTime(a["totalMinutes"])})",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
                 ],
               ),
             ),
           );
         },
       ),
+    ),
     );
   }
 }
