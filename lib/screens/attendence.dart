@@ -77,16 +77,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         final data = jsonDecode(res.body);
         print("DEBUG Attendance today data: $data");
 
-        // TEMPORARY: Accept any date until backend is fixed
-        // Backend is currently creating records for yesterday (2026-01-26) instead of today (2026-01-27)
-        // This allows the UI to show the status even though the date is wrong
+        // ✅ API SPEC: Check if response indicates NOT_STARTED
+        // Response: {"status": "NOT_STARTED", "message": "No attendance record for today"}
+        if (data["status"] == "NOT_STARTED") {
+          print("DEBUG No attendance record for today - status is NOT_STARTED");
+          setState(() {
+            workStatus = "NOT_STARTED";
+            isWorking = false;
+          });
+          return;
+        }
+
         final workDate = data["workDate"];
-        print("DEBUG TEMP FIX: Using record from $workDate (should be today but backend needs fix)");
+        print("DEBUG Attendance record found for: $workDate");
 
         setState(() {
-          // Load work status - API returns CHECKED_IN, COMPLETED, or NOT_STARTED
+          // Load work status - API returns WORKING, NOT_WORKING, CHECKED_IN, COMPLETED
           workStatus = data["status"] ?? "NOT_STARTED";
-          isWorking = (workStatus == "CHECKED_IN");
+
+          // Logic:
+          // - NOT_WORKING = user clicked NO (not working today)
+          // - CHECKED_IN, WORKING, COMPLETED = user clicked YES (working/worked today)
+          // - NOT_STARTED = user hasn't made a selection yet
+          isWorking = (workStatus == "CHECKED_IN" || workStatus == "WORKING" || workStatus == "COMPLETED");
 
           // Load existing overtime/deduction values
           final overtime = data["overtimeHours"];
@@ -102,7 +115,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           _overtimeReasonController.text = data["overtimeReason"] ?? '';
           _deductionReasonController.text = data["deductionReason"] ?? '';
 
-          print("DEBUG Loaded status: $workStatus, overtime: $overtime, deduction: $deduction");
+          print("DEBUG Loaded status: $workStatus, isWorking: $isWorking, overtime: $overtime, deduction: $deduction");
+          print("DEBUG ✅ SIMPLIFIED - YES enabled: ${!isWorking}, NO enabled: ${isWorking}");
         });
       } else if (res.statusCode == 404) {
         print("DEBUG No attendance record found for today");
@@ -118,95 +132,108 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
-  /// ----------------- CHECK IN -----------------
+  /// ----------------- MARK AS WORKING (YES BUTTON) -----------------
   Future<void> _checkIn() async {
-    print("DEBUG _checkIn called - submitting: $submitting, isWorking: $isWorking");
-    if (submitting) return;
+    print("DEBUG _checkIn called - submitting: $submitting, isWorking: $isWorking, workStatus: $workStatus");
+
+    // Prevent multiple calls while submitting
+    if (submitting) {
+      print("DEBUG Blocked duplicate: already submitting");
+      return;
+    }
 
     setState(() => submitting = true);
 
     try {
-      print("DEBUG Calling check-in API...");
-      print("DEBUG Not sending timestamp - letting backend use server time");
+      print("DEBUG Calling NEW API: PUT /attendance/today with status=WORKING");
 
-      final res = await http.post(
-        Uri.parse("$baseUrl/check-in"),
+      // ✅ NEW API: PUT /attendance/today with status: WORKING
+      final res = await http.put(
+        Uri.parse("$baseUrl/today"),
         headers: {
           "Authorization": "Bearer $token",
           "Content-Type": "application/json"
         },
-        body: jsonEncode({}),
+        body: jsonEncode({"status": "WORKING"}),
       );
 
-      print("DEBUG Check-in response: ${res.statusCode} - ${res.body}");
+      print("DEBUG Response: ${res.statusCode} - ${res.body}");
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
-          workStatus = data["status"] ?? "CHECKED_IN";
+          workStatus = data["status"] ?? "WORKING";
           isWorking = true;
         });
-        print("DEBUG Check-in successful - new status: $workStatus, isWorking: $isWorking");
-        _msg("Working status updated");
-        await _loadStatus(); // Reload to get latest data
+        print("DEBUG Success - status: $workStatus, isWorking: $isWorking");
+        _msg("✓ You are working today");
+        await _loadStatus();
       } else {
-        print("DEBUG Check-in failed with status ${res.statusCode}");
-        // Don't show error, just reload status
+        print("DEBUG Failed with status ${res.statusCode}");
+        _msg("Failed to update. Please try again.");
         await _loadStatus();
       }
     } catch (e) {
-      print("DEBUG Check-in error: $e");
-      print("DEBUG Error stack trace: ${StackTrace.current}");
+      print("DEBUG Error: $e");
       _msg("Unable to connect to server");
     } finally {
-      setState(() => submitting = false);
-      print("DEBUG _checkIn completed - submitting set to false");
+      if (mounted) setState(() => submitting = false);
+      print("DEBUG _checkIn completed");
     }
   }
 
-  /// ----------------- CHECK OUT -----------------
-  Future<void> _checkOut() async {
-    print("DEBUG _checkOut called - submitting: $submitting, isWorking: $isWorking");
-    if (submitting) return;
+
+  /// ----------------- MARK NOT WORKING (NO BUTTON) -----------------
+  Future<void> _markNotWorking() async {
+    print("DEBUG _markNotWorking called - submitting: $submitting, workStatus: $workStatus");
+
+    if (submitting) {
+      print("DEBUG Blocked duplicate: already submitting");
+      return;
+    }
 
     setState(() => submitting = true);
 
     try {
-      print("DEBUG Calling check-out API...");
-      print("DEBUG Not sending timestamp - letting backend use server time");
+      print("DEBUG Calling NEW API: PUT /attendance/today with status=NOT_WORKING");
 
-      final res = await http.post(
-        Uri.parse("$baseUrl/check-out"),
+      // ✅ NEW API: PUT /attendance/today with status: NOT_WORKING
+      final res = await http.put(
+        Uri.parse("$baseUrl/today"),
         headers: {
           "Authorization": "Bearer $token",
           "Content-Type": "application/json"
         },
-        body: jsonEncode({}),
+        body: jsonEncode({"status": "NOT_WORKING"}),
       );
 
-      print("DEBUG Check-out response: ${res.statusCode} - ${res.body}");
+      print("DEBUG Response: ${res.statusCode} - ${res.body}");
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
-          workStatus = data["status"] ?? "COMPLETED";
+          workStatus = data["status"] ?? "NOT_WORKING";
           isWorking = false;
+          // Clear overtime/deduction fields since user is not working
+          _overtimeController.clear();
+          _deductionController.clear();
+          _overtimeReasonController.clear();
+          _deductionReasonController.clear();
         });
-        print("DEBUG Check-out successful - new status: $workStatus, isWorking: $isWorking");
-        _msg("Not working status updated");
-        await _loadStatus(); // Reload to get latest data
+        print("DEBUG Success - isWorking: false, status: $workStatus");
+        _msg("✓ You are not working today");
+        await _loadStatus();
       } else {
-        print("DEBUG Check-out failed with status ${res.statusCode}");
-        // Don't show error, just reload status
+        print("DEBUG Failed with status ${res.statusCode}");
+        _msg("Failed to update. Please try again.");
         await _loadStatus();
       }
     } catch (e) {
-      print("DEBUG Check-out error: $e");
-      print("DEBUG Error stack trace: ${StackTrace.current}");
+      print("DEBUG Error: $e");
       _msg("Unable to connect to server");
     } finally {
-      setState(() => submitting = false);
-      print("DEBUG _checkOut completed - submitting set to false");
+      if (mounted) setState(() => submitting = false);
+      print("DEBUG _markNotWorking completed");
     }
   }
 
@@ -280,20 +307,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: submitting ? null : _checkIn,
+                    // Enable YES button when:
+                    // - Not currently submitting
+                    // - Status is NOT_STARTED (first time) OR NOT_WORKING (switching from NO to YES)
+                    // Disable when already CHECKED_IN, WORKING, or COMPLETED
+                    onPressed: (!submitting && (workStatus == "NOT_STARTED" || workStatus == "NOT_WORKING")) ? _checkIn : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: isWorking ? Colors.green.shade700 : Colors.green.shade400,
+                      backgroundColor: isWorking ? Colors.green.shade600 : Colors.green.shade400,
                       foregroundColor: Colors.white,
+                      disabledBackgroundColor: isWorking ? Colors.green.shade600 : Colors.grey.shade400,
+                      disabledForegroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      elevation: isWorking ? 6 : 2,
+                      elevation: isWorking ? 4 : 2,
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.check, size: 24),
+                        Icon(
+                          isWorking ? Icons.check_circle : Icons.check,
+                          size: 24,
+                        ),
                         const SizedBox(width: 8),
                         const Text(
                           "YES",
@@ -309,20 +345,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: submitting ? null : _checkOut,
+                    // Enable NO button when:
+                    // - Not currently submitting
+                    // - Status is NOT_STARTED (first time) OR any working status (CHECKED_IN, WORKING, COMPLETED)
+                    // Disable when already NOT_WORKING
+                    onPressed: (!submitting && workStatus != "NOT_WORKING") ? _markNotWorking : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: !isWorking ? Colors.red.shade700 : Colors.red.shade400,
+                      backgroundColor: !isWorking ? Colors.red.shade600 : Colors.red.shade400,
                       foregroundColor: Colors.white,
+                      disabledBackgroundColor: !isWorking ? Colors.red.shade600 : Colors.grey.shade400,
+                      disabledForegroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      elevation: !isWorking ? 6 : 2,
+                      elevation: !isWorking ? 4 : 2,
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.close, size: 24),
+                        Icon(
+                          !isWorking ? Icons.cancel : Icons.close,
+                          size: 24,
+                        ),
                         const SizedBox(width: 8),
                         const Text(
                           "NO",
@@ -338,11 +383,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ],
             ),
 
-            // Current status indicator - only show if user selected YES or NO
+            // Current status indicator - only show if user has made a selection
             if (workStatus != "NOT_STARTED") ...[
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: isWorking ? Colors.green.shade50 : Colors.red.shade50,
                   borderRadius: BorderRadius.circular(12),
@@ -351,21 +397,50 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     width: 2,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: Column(
                   children: [
-                    Icon(
-                      isWorking ? Icons.check_circle : Icons.cancel,
-                      color: isWorking ? Colors.green.shade700 : Colors.red.shade700,
-                      size: 20,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isWorking ? Icons.check_circle : Icons.cancel,
+                          color: isWorking ? Colors.green.shade700 : Colors.red.shade700,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            isWorking ? "You selected: YES (Working today)" : "You selected: NO (Not working today)",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: isWorking ? Colors.green.shade800 : Colors.red.shade800,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Text(
-                      isWorking ? "You are working today" : "You are not working today",
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: isWorking ? Colors.green.shade800 : Colors.red.shade800,
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.info_outline, size: 14, color: Colors.grey.shade700),
+                          const SizedBox(width: 6),
+                          Text(
+                            "You can change your selection by clicking the other button",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade700,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],

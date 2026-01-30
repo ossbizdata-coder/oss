@@ -26,6 +26,7 @@ class _AttendanceAdjustmentDialogState
   final _overtimeReasonController = TextEditingController();
   final _deductionReasonController = TextEditingController();
   bool _saving = false;
+  String _selectedStatus = 'WORKING'; // Default to WORKING
 
   @override
   void initState() {
@@ -33,7 +34,9 @@ class _AttendanceAdjustmentDialogState
     // Pre-fill if values exist
     final overtime = widget.attendance['overtimeHours'] ?? 0;
     final deduction = widget.attendance['deductionHours'] ?? 0;
+    final currentStatus = widget.attendance['status'] ?? 'WORKING';
 
+    _selectedStatus = currentStatus;
     _overtimeController.text = overtime > 0 ? overtime.toString() : '';
     _deductionController.text = deduction > 0 ? deduction.toString() : '';
     _overtimeReasonController.text = widget.attendance['overtimeReason'] ?? '';
@@ -60,6 +63,34 @@ class _AttendanceAdjustmentDialogState
       final token = prefs.getString("token");
       final attendanceId = widget.attendance['id'];
 
+      // First update status if changed
+      final currentStatus = widget.attendance['status'] ?? 'WORKING';
+      if (_selectedStatus != currentStatus) {
+        final statusResponse = await http.put(
+          Uri.parse('http://74.208.132.78/api/attendance/$attendanceId/status'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({
+            'status': _selectedStatus,
+          }),
+        );
+
+        if (statusResponse.statusCode != 200) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to update status: ${statusResponse.body}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      // Then update adjustments
       final response = await http.put(
         Uri.parse('http://74.208.132.78/api/attendance/$attendanceId/adjustments'),
         headers: {
@@ -79,7 +110,7 @@ class _AttendanceAdjustmentDialogState
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Adjustments saved successfully'),
+              content: Text('Changes saved successfully'),
               backgroundColor: Colors.green,
             ),
           );
@@ -115,8 +146,7 @@ class _AttendanceAdjustmentDialogState
   Widget build(BuildContext context) {
     final workDate = widget.attendance['workDate'];
     final userName = widget.attendance['userName'] ?? 'Unknown';
-    final totalMinutes = widget.attendance['totalMinutes'] ?? 0;
-    final hours = totalMinutes / 60.0;
+    final status = widget.attendance['status'] ?? 'UNKNOWN';
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -175,7 +205,7 @@ class _AttendanceAdjustmentDialogState
                       style: const TextStyle(fontWeight: FontWeight.w500),
                     ),
                     Text(
-                      '${hours.toStringAsFixed(1)} hours worked',
+                      'Status: $status',
                       style: TextStyle(
                         color: Colors.blue.shade900,
                         fontWeight: FontWeight.w600,
@@ -184,6 +214,116 @@ class _AttendanceAdjustmentDialogState
                   ],
                 ),
               ),
+              const SizedBox(height: 24),
+
+              // YES/NO STATUS TOGGLE
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Change Attendance Status',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _saving
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _selectedStatus = 'WORKING';
+                                  });
+                                },
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: _selectedStatus == 'WORKING'
+                                ? Colors.green
+                                : Colors.white,
+                            foregroundColor: _selectedStatus == 'WORKING'
+                                ? Colors.white
+                                : Colors.green,
+                            side: BorderSide(
+                              color: Colors.green,
+                              width: 2,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.check_circle,
+                                size: 20,
+                                color: _selectedStatus == 'WORKING'
+                                    ? Colors.white
+                                    : Colors.green,
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'YES - Worked',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _saving
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _selectedStatus = 'NOT_WORKING';
+                                  });
+                                },
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: _selectedStatus == 'NOT_WORKING'
+                                ? Colors.red
+                                : Colors.white,
+                            foregroundColor: _selectedStatus == 'NOT_WORKING'
+                                ? Colors.white
+                                : Colors.red,
+                            side: BorderSide(
+                              color: Colors.red,
+                              width: 2,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.cancel,
+                                size: 20,
+                                color: _selectedStatus == 'NOT_WORKING'
+                                    ? Colors.white
+                                    : Colors.red,
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'NO - Not Worked',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
               const SizedBox(height: 24),
 
               // OVERTIME SECTION

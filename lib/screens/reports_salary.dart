@@ -65,6 +65,10 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
 
       users = jsonDecode(usersRes.body);
 
+      // ✅ Filter to only include specific user IDs for salary calculation
+      final allowedUserIds = [7, 8, 9, 47];
+      users = users.where((user) => allowedUserIds.contains(user['id'])).toList();
+
       final now = DateTime(selectedYear, selectedMonth);
       userSalary.clear();
 
@@ -79,6 +83,7 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
 
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body);
+
 
           // Parse new fields with backward compatibility
           final totalSalary = (data['totalSalary'] is num)
@@ -353,43 +358,124 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
               final hoursDouble = (hours is num) ? hours.toDouble() : double.tryParse(hours.toString()) ?? 0.0;
               final salaryVal = (d['salary'] ?? 0);
               final salaryDouble = (salaryVal is num) ? salaryVal.toDouble() : double.tryParse(salaryVal.toString()) ?? 0.0;
+
+              // Parse overtime and deduction
+              final overtime = (d['overtimeHours'] ?? 0);
+              final overtimeDouble = (overtime is num) ? overtime.toDouble() : double.tryParse(overtime.toString()) ?? 0.0;
+              final deduction = (d['deductionHours'] ?? 0);
+              final deductionDouble = (deduction is num) ? deduction.toDouble() : double.tryParse(deduction.toString()) ?? 0.0;
+              final overtimeReason = d['overtimeReason'];
+              final deductionReason = d['deductionReason'];
+              final status = d['status'] ?? 'UNKNOWN';
+
+
+              // Determine if worked
+              final isWorked = (status == 'WORKING' || status == 'CHECKED_IN' || status == 'COMPLETED');
+
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF7F9FB),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isWorked ? Colors.green.shade200 : Colors.red.shade200,
+                    width: 1,
+                  ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          date != null
-                              ? dateFmt.format(date)
-                              : '',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                          ),
+                        Row(
+                          children: [
+                            Icon(
+                              isWorked ? Icons.check_circle : Icons.cancel,
+                              size: 16,
+                              color: isWorked ? Colors.green.shade700 : Colors.red.shade700,
+                            ),
+                            const SizedBox(width: 8),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  date != null ? dateFmt.format(date) : '',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  isWorked
+                                      ? '${hoursDouble.toStringAsFixed(1)} hrs'
+                                      : 'Not Worked',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
                         Text(
-                          '${hoursDouble.toStringAsFixed(1)} hrs',
+                          currency.format(salaryDouble),
                           style: TextStyle(
-                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: isWorked ? Colors.green.shade900 : Colors.red.shade700,
                           ),
                         ),
                       ],
                     ),
-                    Text(
-                      currency.format(salaryDouble),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                    ),
+
+                    // Show overtime/deduction if exists
+                    if (overtimeDouble > 0 || deductionDouble > 0) ...[
+                      const SizedBox(height: 10),
+                      const Divider(height: 1),
+                      const SizedBox(height: 8),
+
+                      if (overtimeDouble > 0) ...[
+                        Row(
+                          children: [
+                            Icon(Icons.add_circle_outline, size: 14, color: Colors.blue.shade700),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'OT: ${overtimeDouble.toStringAsFixed(1)}h${overtimeReason != null && overtimeReason.toString().isNotEmpty ? ' - $overtimeReason' : ''}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (deductionDouble > 0) const SizedBox(height: 6),
+                      ],
+
+                      if (deductionDouble > 0) ...[
+                        Row(
+                          children: [
+                            Icon(Icons.remove_circle_outline, size: 14, color: Colors.orange.shade700),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Deduction: ${deductionDouble.toStringAsFixed(1)}h${deductionReason != null && deductionReason.toString().isNotEmpty ? ' - $deductionReason' : ''}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.orange.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ],
                 ),
               );

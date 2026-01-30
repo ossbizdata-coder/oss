@@ -96,29 +96,27 @@ class _MyAttendanceReportScreenState
           }
         }
 
-        // Get today's date as timestamp (end of day)
+        // Get today's date as timestamp (start of day for comparison)
         final today = DateTime.now();
-        final todayEndOfDay = DateTime(today.year, today.month, today.day, 23, 59, 59);
-        final todayTimestamp = todayEndOfDay.millisecondsSinceEpoch;
+        final todayStartOfDay = DateTime(today.year, today.month, today.day, 0, 0, 0);
+        final todayTimestamp = todayStartOfDay.millisecondsSinceEpoch;
 
         if (decoded is List) {
-          // Filter records up to today only, then sort by workDate in descending order
+          // Filter records up to today only (exclude future dates)
           final filtered = List<dynamic>.from(decoded).where((record) {
             final workDate = record['workDate'];
             if (workDate == null) return false;
 
-            // Handle both timestamp and ISO date string
-            int recordTimestamp;
+            // Parse workDate to DateTime
+            DateTime recordDate;
             if (workDate is int) {
-              recordTimestamp = workDate;
+              recordDate = DateTime.fromMillisecondsSinceEpoch(workDate);
             } else if (workDate is String) {
               try {
-                // Try parsing as ISO date
-                recordTimestamp = DateTime.parse(workDate).millisecondsSinceEpoch;
+                recordDate = DateTime.parse(workDate);
               } catch (e) {
-                // Try parsing as timestamp string
                 try {
-                  recordTimestamp = int.parse(workDate);
+                  recordDate = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
                 } catch (e2) {
                   return false;
                 }
@@ -127,29 +125,81 @@ class _MyAttendanceReportScreenState
               return false;
             }
 
-            // Only include if workDate <= today
-            return recordTimestamp <= todayTimestamp;
+            // Only include if date is today or in the past (exclude future dates)
+            final recordDateOnly = DateTime(recordDate.year, recordDate.month, recordDate.day);
+            final todayDateOnly = DateTime(today.year, today.month, today.day);
+            return !recordDateOnly.isAfter(todayDateOnly);
           }).toList();
 
-          filtered.sort((a, b) {
-            // Sort by workDate in descending order
-            final dateA = a['workDate'];
-            final dateB = b['workDate'];
+          // Deduplicate: Group by date (ignoring time) and keep the most recent record per date
+          final Map<String, dynamic> uniqueRecords = {};
+          for (var record in filtered) {
+            final workDate = record['workDate'];
+            DateTime dateTime;
 
-            // Handle comparison for both int and string
-            if (dateA is int && dateB is int) {
-              return dateB.compareTo(dateA);
-            } else if (dateA is String && dateB is String) {
-              return dateB.compareTo(dateA);
+            if (workDate is int) {
+              dateTime = DateTime.fromMillisecondsSinceEpoch(workDate);
+            } else if (workDate is String) {
+              try {
+                dateTime = DateTime.parse(workDate);
+              } catch (e) {
+                try {
+                  dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
+                } catch (e2) {
+                  continue;
+                }
+              }
             } else {
-              // Mixed types, convert to comparable format
-              return 0;
+              continue;
             }
+
+            // Create date key (YYYY-MM-DD)
+            final dateKey = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
+
+            // ✅ FIX: Always REPLACE to keep last occurrence (most recent from backend)
+            // The /history endpoint doesn't return 'id' field, so we can't compare IDs
+            // Backend returns older records first, so last occurrence = most recent action
+            uniqueRecords[dateKey] = record;
+            print("DEBUG: Date $dateKey - Updating with status=${record['status']}");
+          }
+
+          // Convert back to list and sort by workDate in descending order
+          final deduplicated = uniqueRecords.values.toList();
+          deduplicated.sort((a, b) {
+            final timestampA = _getTimestamp(a['workDate']);
+            final timestampB = _getTimestamp(b['workDate']);
+            return timestampB.compareTo(timestampA);
           });
-          setState(() => attendanceList = filtered);
-          print("DEBUG: Loaded ${attendanceList.length} attendance records up to today (sorted DESC)");
+
+          setState(() => attendanceList = deduplicated);
+
+          // Debug: Show all unique dates we have records for
+          print("DEBUG: Loaded ${attendanceList.length} unique attendance records up to today (sorted DESC)");
+          print("DEBUG: Dates with records:");
+          for (var record in deduplicated.take(5)) {
+            final workDate = record['workDate'];
+            final dateTime = workDate is int
+                ? DateTime.fromMillisecondsSinceEpoch(workDate)
+                : DateTime.parse(workDate.toString());
+            final dateStr = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
+            final status = record['status'];
+            final isWorking = record['isWorking'];
+            print("DEBUG:   $dateStr - status=$status, isWorking=$isWorking");
+          }
+
+          // Check if we have a record for today
+          final todayDateStr = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+          final hasToday = deduplicated.any((r) {
+            final workDate = r['workDate'];
+            final dateTime = workDate is int
+                ? DateTime.fromMillisecondsSinceEpoch(workDate)
+                : DateTime.parse(workDate.toString());
+            final dateStr = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
+            return dateStr == todayDateStr;
+          });
+          print("DEBUG: Has record for TODAY ($todayDateStr)? $hasToday");
         } else if (decoded is Map && decoded.containsKey('data')) {
-          // Filter records up to today only, then sort by workDate in descending order
+          // Filter records up to today only
           final filtered = List<dynamic>.from(decoded['data'] ?? []).where((record) {
             final workDate = record['workDate'];
             if (workDate == null) return false;
@@ -178,23 +228,48 @@ class _MyAttendanceReportScreenState
             return recordTimestamp <= todayTimestamp;
           }).toList();
 
-          filtered.sort((a, b) {
-            // Sort by workDate in descending order
-            final dateA = a['workDate'];
-            final dateB = b['workDate'];
+          // Deduplicate: Group by date (ignoring time) and keep the most recent record per date
+          final Map<String, dynamic> uniqueRecords = {};
+          for (var record in filtered) {
+            final workDate = record['workDate'];
+            DateTime dateTime;
 
-            // Handle comparison for both int and string
-            if (dateA is int && dateB is int) {
-              return dateB.compareTo(dateA);
-            } else if (dateA is String && dateB is String) {
-              return dateB.compareTo(dateA);
+            if (workDate is int) {
+              dateTime = DateTime.fromMillisecondsSinceEpoch(workDate);
+            } else if (workDate is String) {
+              try {
+                dateTime = DateTime.parse(workDate);
+              } catch (e) {
+                try {
+                  dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
+                } catch (e2) {
+                  continue;
+                }
+              }
             } else {
-              // Mixed types, convert to comparable format
-              return 0;
+              continue;
             }
+
+            // Create date key (YYYY-MM-DD)
+            final dateKey = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
+
+            // ✅ FIX: Always REPLACE to keep last occurrence (most recent from backend)
+            // The /history endpoint doesn't return 'id' field, so we can't compare IDs
+            // Backend returns older records first, so last occurrence = most recent action
+            uniqueRecords[dateKey] = record;
+            print("DEBUG: Date $dateKey - Updating with status=${record['status']}");
+          }
+
+          // Convert back to list and sort by workDate in descending order
+          final deduplicated = uniqueRecords.values.toList();
+          deduplicated.sort((a, b) {
+            final timestampA = _getTimestamp(a['workDate']);
+            final timestampB = _getTimestamp(b['workDate']);
+            return timestampB.compareTo(timestampA);
           });
-          setState(() => attendanceList = filtered);
-          print("DEBUG: Loaded ${attendanceList.length} attendance records from 'data' field up to today (sorted DESC)");
+
+          setState(() => attendanceList = deduplicated);
+          print("DEBUG: Loaded ${attendanceList.length} unique attendance records from 'data' field up to today (sorted DESC)");
         } else {
           print("DEBUG: Unexpected response format: $decoded");
           setState(() => attendanceList = []);
@@ -215,6 +290,24 @@ class _MyAttendanceReportScreenState
         );
       }
     }
+  }
+
+  // Helper method to get timestamp from workDate (handles both int and string)
+  int _getTimestamp(dynamic workDate) {
+    if (workDate is int) {
+      return workDate;
+    } else if (workDate is String) {
+      try {
+        return DateTime.parse(workDate).millisecondsSinceEpoch;
+      } catch (e) {
+        try {
+          return int.parse(workDate);
+        } catch (e2) {
+          return 0;
+        }
+      }
+    }
+    return 0;
   }
 
   // 📅 Date formatter - handles both ISO date strings and timestamps
@@ -246,52 +339,41 @@ class _MyAttendanceReportScreenState
         "${d.year}";
   }
 
-  // ⏰ Time formatter
-  String formatTime(String? iso) {
-    if (iso == null) return "-";
-    final utc = DateTime.parse(iso);
-    final local = utc.toLocal();
-    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    final minute = local.minute.toString().padLeft(2, '0');
-    final ampm = local.hour < 12 ? 'AM' : 'PM';
-    return "$hour:$minute $ampm";
-  }
-
-  // ⏱ Total hours formatter
-  String formatTotalTime(int? totalMinutes) {
-    if (totalMinutes == null || totalMinutes <= 0) return "--";
-    final hours = totalMinutes ~/ 60;
-    final minutes = totalMinutes % 60;
-    return "${hours}h ${minutes}m";
-  }
-
   Map<String, dynamic> determineStatus(Map a) {
-    // Check the status field from database
-    final status = a["status"];
-    final checkIn = a["checkInTime"];
+    // ✅ NEW SIMPLIFIED LOGIC: Check is_working flag first (if available)
+    // Backend now uses is_working boolean flag (true = worked, false = didn't work)
 
+    final isWorking = a["isWorking"];
     String statusText;
     Color statusColor;
     IconData statusIcon;
 
-    // Check status field first (for records from database)
-    if (status == "WORKING" || status == "CHECKED_IN") {
-      statusText = "WORKED";
-      statusColor = Colors.green;
-      statusIcon = Icons.check_circle;
-    } else if (status == "NOT_WORKING") {
-      statusText = "DID NOT WORK";
-      statusColor = Colors.red;
-      statusIcon = Icons.cancel;
-    } else if (checkIn != null) {
-      // Fallback: If they checked in at all, they worked
-      statusText = "WORKED";
-      statusColor = Colors.green;
-      statusIcon = Icons.check_circle;
-    } else {
-      statusText = "DID NOT WORK";
-      statusColor = Colors.red;
-      statusIcon = Icons.cancel;
+    // Priority 1: Check is_working flag (new simplified backend)
+    if (isWorking != null) {
+      if (isWorking == true || isWorking == 1) {
+        statusText = "WORKED";
+        statusColor = Colors.green;
+        statusIcon = Icons.check_circle;
+      } else {
+        statusText = "DID NOT WORK";
+        statusColor = Colors.red;
+        statusIcon = Icons.cancel;
+      }
+    }
+    // Priority 2: Fallback to old status field for backward compatibility
+    else {
+      final status = a["status"];
+
+      if (status == "NOT_WORKING") {
+        statusText = "DID NOT WORK";
+        statusColor = Colors.red;
+        statusIcon = Icons.cancel;
+      } else {
+        // WORKING, CHECKED_IN, COMPLETED all mean user selected YES (worked)
+        statusText = "WORKED";
+        statusColor = Colors.green;
+        statusIcon = Icons.check_circle;
+      }
     }
 
     return {
@@ -303,10 +385,34 @@ class _MyAttendanceReportScreenState
 
   @override
   Widget build(BuildContext context) {
+    // Check if we have a record for today
+    final today = DateTime.now();
+    final todayDateStr = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+    final hasToday = attendanceList.any((r) {
+      final workDate = r['workDate'];
+      final dateTime = workDate is int
+          ? DateTime.fromMillisecondsSinceEpoch(workDate)
+          : DateTime.parse(workDate.toString());
+      final dateStr = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
+      return dateStr == todayDateStr;
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("My Attendance Report"),
       ),
+      // ✅ ADD: Floating button to create today's record if missing
+      floatingActionButton: !loading && !hasToday ? FloatingActionButton.extended(
+        onPressed: () async {
+          // Navigate to attendance screen to mark today
+          await Navigator.pushNamed(context, '/attendance');
+          // Reload after coming back
+          await fetchAttendance();
+        },
+        icon: const Icon(Icons.add),
+        label: const Text("Mark Today"),
+        backgroundColor: Colors.blue,
+      ) : null,
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -409,37 +515,45 @@ class _MyAttendanceReportScreenState
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const SizedBox(height: 6),
-                                  Row(
-                                    children: [
-                                      if (hasOvertime) ...[
+                                  if (hasOvertime) ...[
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
                                         Icon(Icons.add_circle_outline,
                                             size: 14, color: Colors.green.shade700),
                                         const SizedBox(width: 4),
                                         Text(
-                                          "${overtimeValue!.toStringAsFixed(1)}h OT",
+                                          "${overtimeValue.toStringAsFixed(1)}h OT${a["overtimeReason"] != null && a["overtimeReason"].toString().isNotEmpty ? ' (${a["overtimeReason"]})' : ''}",
                                           style: TextStyle(
                                             fontSize: 12,
                                             color: Colors.green.shade700,
                                             fontWeight: FontWeight.w600,
                                           ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
-                                        if (hasDeduction) const SizedBox(width: 12),
                                       ],
-                                      if (hasDeduction) ...[
+                                    ),
+                                    if (hasDeduction) const SizedBox(height: 4),
+                                  ],
+                                  if (hasDeduction) ...[
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
                                         Icon(Icons.remove_circle_outline,
                                             size: 14, color: Colors.red.shade700),
                                         const SizedBox(width: 4),
                                         Text(
-                                          "${deductionValue!.toStringAsFixed(1)}h Off",
+                                          "${deductionValue.toStringAsFixed(1)}h Off${a["deductionReason"] != null && a["deductionReason"].toString().isNotEmpty ? ' (${a["deductionReason"]})' : ''}",
                                           style: TextStyle(
                                             fontSize: 12,
                                             color: Colors.red.shade700,
                                             fontWeight: FontWeight.w600,
                                           ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ],
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ],
                               );
                             },
@@ -478,51 +592,6 @@ class _MyAttendanceReportScreenState
                       ),
                     ],
                   ),
-
-
-                  // Reasons (if available)
-                  if (a["overtimeReason"] != null &&
-                      a["overtimeReason"].toString().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            "OT: ${a["overtimeReason"]}",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                              fontStyle: FontStyle.italic,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (a["deductionReason"] != null &&
-                      a["deductionReason"].toString().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            "Deduction: ${a["deductionReason"]}",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                              fontStyle: FontStyle.italic,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                 ],
               ),
             ),

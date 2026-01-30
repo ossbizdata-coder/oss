@@ -21,7 +21,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
   String? error;
 
   final dateFmt = DateFormat('dd MMM yyyy');
-  final timeFmt = DateFormat('hh:mm a');
 
   @override
   void initState() {
@@ -29,12 +28,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
     fetchAttendanceForAllUsers();
   }
 
-  /// 🔹 Convert minutes → "Xh Ym"
-  String formatDuration(int minutes) {
-    final hours = minutes ~/ 60;
-    final mins = minutes % 60;
-    return '${hours}h ${mins}m';
-  }
 
   Future<void> fetchAttendanceForAllUsers() async {
     setState(() {
@@ -227,8 +220,7 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
                 )
               ]
                   : attList.map<Widget>((att) {
-                DateTime? workDate, checkIn, checkOut;
-                int? totalMinutes;
+                DateTime? workDate;
                 String? status;
 
                 try {
@@ -238,37 +230,13 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
                         .toUtc()
                         .toLocal();
                   }
-                  if (att['checkInTime'] != null) {
-                    checkIn = DateTime.parse(
-                        att['checkInTime'])
-                        .toUtc()
-                        .toLocal();
-                  }
-                  if (att['checkOutTime'] != null) {
-                    checkOut = DateTime.parse(
-                        att['checkOutTime'])
-                        .toUtc()
-                        .toLocal();
-                  }
-                  if (att['totalMinutes'] != null) {
-                    totalMinutes =
-                    att['totalMinutes'] is int
-                        ? att['totalMinutes']
-                        : int.tryParse(att[
-                    'totalMinutes']
-                        .toString());
-                  }
                   status = att['status']?.toString();
                 } catch (_) {}
 
                 return _attendanceRow(
                   primary: primary,
                   date: workDate,
-                  checkIn: checkIn,
-                  checkOut: checkOut,
-                  totalMinutes: totalMinutes,
                   status: status,
-                  manual: att['manualCheckout'] == true,
                   attendanceData: att,
                   userName: user['name'] ?? 'N/A',
                 );
@@ -283,51 +251,36 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
   Widget _attendanceRow({
     required Color primary,
     DateTime? date,
-    DateTime? checkIn,
-    DateTime? checkOut,
-    int? totalMinutes,
     String? status,
-    bool manual = false,
     required Map<String, dynamic> attendanceData,
     required String userName,
   }) {
-    final computedMinutes =
-    (checkIn != null && checkOut != null) ? checkOut.difference(checkIn).inMinutes : null;
-
-    final minutesToShow = totalMinutes ?? computedMinutes;
-
     final overtimeHours = (attendanceData['overtimeHours'] ?? 0).toDouble();
     final deductionHours = (attendanceData['deductionHours'] ?? 0).toDouble();
     final overtimeReason = attendanceData['overtimeReason']?.toString() ?? '';
     final deductionReason = attendanceData['deductionReason']?.toString() ?? '';
 
-    // Determine status text, color, and icon based on new system
+    // ✅ Standardize status labels: Only WORKED or NOT WORKED
     String displayStatus;
     Color statusColor;
     IconData statusIcon;
 
-    if (status == 'WORKING') {
-      displayStatus = 'WORKING';
+    // Check if user worked (WORKING, CHECKED_IN, COMPLETED are all "worked")
+    bool isWorked = (status == 'WORKING' || status == 'CHECKED_IN' || status == 'COMPLETED');
+
+    if (isWorked) {
+      displayStatus = 'WORKED';
       statusColor = Colors.green.shade700;
       statusIcon = Icons.check_circle;
     } else if (status == 'NOT_WORKING') {
-      displayStatus = 'NOT WORKING';
-      statusColor = Colors.grey.shade600;
-      statusIcon = Icons.cancel;
-    } else if (status == 'COMPLETED') {
-      // Legacy status from old system
-      displayStatus = 'COMPLETED';
-      statusColor = Colors.blue.shade700;
-      statusIcon = Icons.check_circle_outline;
-    } else if (status == 'CHECKED_IN') {
-      // Legacy status from old system
-      displayStatus = 'CHECKED IN';
-      statusColor = Colors.orange.shade700;
-      statusIcon = Icons.access_time;
-    } else {
-      displayStatus = 'NO RECORD';
+      displayStatus = 'NOT WORKED';
       statusColor = Colors.red.shade700;
-      statusIcon = Icons.error_outline;
+      statusIcon = Icons.cancel;
+    } else {
+      // No record
+      displayStatus = 'NO RECORD';
+      statusColor = Colors.grey.shade600;
+      statusIcon = Icons.help_outline;
     }
 
     return Container(
@@ -514,39 +467,15 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
               ),
             ],
           ],
-
-          // Legacy check-in/check-out times (only show if available)
-          if (checkIn != null || checkOut != null) ...[
-            const SizedBox(height: 10),
-            const Divider(height: 1),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
-                const SizedBox(width: 6),
-                Text(
-                  '${checkIn != null ? timeFmt.format(checkIn) : 'N/A'} - ${checkOut != null ? timeFmt.format(checkOut) : 'N/A'}',
-                  style: TextStyle(
-                    color: Colors.grey.shade700,
-                    fontSize: 12,
-                  ),
-                ),
-                if (minutesToShow != null) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    '(${formatDuration(minutesToShow)})',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
         ],
       ),
     );
+  }
+
+  /// 🔹 Convert minutes → "Xh Ym" (kept for backward compatibility but no longer used)
+  String formatDuration(int minutes) {
+    final hours = minutes ~/ 60;
+    final mins = minutes % 60;
+    return '${hours}h ${mins}m';
   }
 }
