@@ -48,7 +48,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
         return;
       }
 
-      // ------------------ USERS ------------------
       final usersRes = await http.get(
         Uri.parse('http://74.208.132.78/api/users'),
         headers: {'Authorization': 'Bearer $token'},
@@ -64,8 +63,9 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
 
       try {
         final allUsers = List<Map<String, dynamic>>.from(jsonDecode(usersRes.body));
-        // Filter to show only ADMIN users
-        users = allUsers.where((user) => user['role'] == 'ADMIN').toList();
+        users = allUsers.where((user) =>
+          user['role'] == 'ADMIN' || user['id'] == 1
+        ).toList();
       } catch (e) {
         setState(() {
           error = "Failed to parse users data: $e";
@@ -74,7 +74,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
         return;
       }
 
-      // ---------------- ATTENDANCE ----------------
       final attRes = await http.get(
         Uri.parse('http://74.208.132.78/api/attendance/all'),
         headers: {'Authorization': 'Bearer $token'},
@@ -99,7 +98,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
         return;
       }
 
-      // ---------------- MAPPING ----------------
       userAttendance.clear();
       for (var att in allAttendance) {
         final userId = int.tryParse(
@@ -110,18 +108,16 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
         userAttendance.putIfAbsent(userId, () => []).add(att);
       }
 
-      // ---------------- SORT DESC ----------------
       userAttendance.forEach((key, list) {
         list.sort((a, b) {
           DateTime dateA = DateTime.tryParse(a['workDate'] ?? '') ?? DateTime(2000);
           DateTime dateB = DateTime.tryParse(b['workDate'] ?? '') ?? DateTime(2000);
-          return dateB.compareTo(dateA); // Descending
+          return dateB.compareTo(dateA);
         });
       });
 
       setState(() => loading = false);
-    } catch (e, st) {
-      // debugPrint('Error fetching attendance: $e\n$st');
+    } catch (e) {
       setState(() {
         error = "Error: $e";
         loading = false;
@@ -260,12 +256,10 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
     final overtimeReason = attendanceData['overtimeReason']?.toString() ?? '';
     final deductionReason = attendanceData['deductionReason']?.toString() ?? '';
 
-    // ✅ Standardize status labels: Only WORKED or NOT WORKED
     String displayStatus;
     Color statusColor;
     IconData statusIcon;
 
-    // Check if user worked (WORKING, CHECKED_IN, COMPLETED are all "worked")
     bool isWorked = (status == 'WORKING' || status == 'CHECKED_IN' || status == 'COMPLETED');
 
     if (isWorked) {
@@ -297,7 +291,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Date and Status Row
           Row(
             children: [
               Icon(Icons.calendar_today, size: 18, color: primary),
@@ -344,7 +337,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              // Edit button
               IconButton(
                 icon: const Icon(Icons.edit, size: 20),
                 onPressed: () {
@@ -366,104 +358,93 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
             ],
           ),
 
-          // Overtime and Deduction Info
           if (overtimeHours > 0 || deductionHours > 0) ...[
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (overtimeHours > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.shade200),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.add_circle_outline, size: 14, color: Colors.green.shade700),
-                        const SizedBox(width: 4),
-                        Text(
-                          'OT: ${overtimeHours.toStringAsFixed(1)}h',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.green.shade700,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (deductionHours > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red.shade200),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.remove_circle_outline, size: 14, color: Colors.red.shade700),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Deduct: ${deductionHours.toStringAsFixed(1)}h',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.red.shade700,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ],
 
-          // Reasons
-          if (overtimeReason.isNotEmpty || deductionReason.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            if (overtimeReason.isNotEmpty)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'OT: $overtimeReason',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                        fontStyle: FontStyle.italic,
+            if (overtimeHours > 0) ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.add_circle_outline, size: 16, color: Colors.green.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Overtime: ${overtimeHours.toStringAsFixed(1)} hours',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.green.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (overtimeReason.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              overtimeReason,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.green.shade600,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            if (deductionReason.isNotEmpty) ...[
-              if (overtimeReason.isNotEmpty) const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Deduction: $deductionReason',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                        fontStyle: FontStyle.italic,
+              if (deductionHours > 0) const SizedBox(height: 8),
+            ],
+
+            if (deductionHours > 0) ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.remove_circle_outline, size: 16, color: Colors.red.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Deduction: ${deductionHours.toStringAsFixed(1)} hours',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (deductionReason.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              deductionReason,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.red.shade600,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ],
@@ -472,7 +453,6 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
     );
   }
 
-  /// 🔹 Convert minutes → "Xh Ym" (kept for backward compatibility but no longer used)
   String formatDuration(int minutes) {
     final hours = minutes ~/ 60;
     final mins = minutes % 60;

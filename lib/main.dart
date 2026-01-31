@@ -30,14 +30,8 @@ class OneStopDailyApp extends StatelessWidget {
     if (pin != null) {
       // Pass onPinSuccess callback for navigation
       return PinEntryScreen(onPinSuccess: () {
-        // This context is valid in the MaterialApp builder
-        // Use a post-frame callback to ensure navigation works
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          Navigator.pushReplacementNamed(
-            navigatorKey.currentContext!,
-            "/main",
-          );
-        });
+        // Use navigatorKey to navigate after PIN is verified
+        navigatorKey.currentState?.pushReplacementNamed("/main");
       });
     } else {
       return const LoginScreen();

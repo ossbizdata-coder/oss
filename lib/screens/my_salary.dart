@@ -55,11 +55,8 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
         },
       );
 
-      print("DEBUG Credits Breakdown API: ${res.statusCode}");
-
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        print("DEBUG Credits Breakdown Response: $data");
 
         if (mounted) {
           setState(() {
@@ -67,15 +64,11 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
           });
         }
       } else {
-        print("DEBUG Credits Breakdown API Error: ${res.statusCode} - ${res.body}");
-        // If endpoint doesn't exist, just continue without credits breakdown
         if (mounted) {
           setState(() => creditsBreakdown = []);
         }
       }
     } catch (e) {
-      print("DEBUG Credits Breakdown API Exception: $e");
-      // Fail silently - credits breakdown is optional
       if (mounted) {
         setState(() => creditsBreakdown = []);
       }
@@ -121,11 +114,25 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
         },
       );
 
-      print("DEBUG Salary API: ${res.statusCode}");
-
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        print("DEBUG Salary Response: $data");
+
+        double unpaidCredits = 0.0;
+        try {
+          final creditsRes = await http.get(
+            Uri.parse("http://74.208.132.78/api/credits/me/summary"),
+            headers: {
+              "Authorization": "Bearer $token",
+              "Content-Type": "application/json",
+            },
+          );
+
+          if (creditsRes.statusCode == 200) {
+            final creditsData = jsonDecode(creditsRes.body);
+            unpaidCredits = (creditsData["unpaidCredits"] ?? 0).toDouble();
+          }
+        } catch (e) {
+        }
 
         if (mounted) {
           setState(() {
@@ -134,20 +141,17 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
             deductionRatePerHour = (data["deductionRatePerHour"] ?? 0).toDouble();
             totalDaysWorked = (data["totalDaysWorked"] ?? 0).toInt();
 
-            // ✅ Use totalCredits from salary API response (already includes credits)
-            totalCredits = (data["totalCredits"] ?? 0).toDouble();
+            totalCredits = unpaidCredits;
 
-            // baseSalary and totalSalary from API
             baseSalary = (data["baseSalary"] ?? data["totalSalary"] ?? 0).toDouble();
-            totalSalary = (data["totalSalary"] ?? 0).toDouble();
 
+            totalSalary = baseSalary - totalCredits;
 
             daily = List.from(data["dailyBreakdown"] ?? [])
               ..sort((a, b) =>
                   DateTime.parse(b["date"])
                       .compareTo(DateTime.parse(a["date"])));
 
-            // Calculate total overtime and deduction hours
             totalOvertimeHours = 0;
             totalDeductionHours = 0;
             for (var day in daily) {
@@ -155,23 +159,17 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
               totalDeductionHours += (day["deductionHours"] ?? 0).toDouble();
             }
 
-            // Calculate monetary values
             totalOvertimeAmount = totalOvertimeHours * hourlyRate;
             totalDeductionAmount = totalDeductionHours * deductionRatePerHour;
 
             loading = false;
           });
         }
-        print("DEBUG dailySalary: $dailySalary, hourlyRate: $hourlyRate, deductionRate: $deductionRatePerHour");
-        print("DEBUG baseSalary: $baseSalary, totalCredits: $totalCredits, finalSalary: $totalSalary");
-        print("DEBUG Total OT: $totalOvertimeHours hrs = Rs $totalOvertimeAmount, Total Deduction: $totalDeductionHours hrs = Rs $totalDeductionAmount");
 
-        // Fetch credits breakdown if user has credits
         if (totalCredits > 0) {
           await fetchCreditsBreakdown();
         }
       } else {
-        print("DEBUG Salary API Error: ${res.statusCode} - ${res.body}");
         if (mounted) {
           setState(() => loading = false);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -180,7 +178,6 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
         }
       }
     } catch (e) {
-      print("DEBUG Salary API Exception: $e");
       if (mounted) {
         setState(() => loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -409,7 +406,7 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                             Icon(Icons.credit_card_outlined, size: 14, color: Colors.orange.shade300),
                             const SizedBox(width: 6),
                             Text(
-                              "Total Credits",
+                              "Credits",
                               style: TextStyle(
                                 color: Colors.orange.shade300,
                                 fontSize: 13,
@@ -643,7 +640,6 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
               ...daily.asMap().entries.map((entry) {
                 final index = entry.key;
                 final d = entry.value;
-                print("DEBUG Daily item $index: $d");
 
                   final date = DateFormat.yMMMd()
                       .format(DateTime.parse(d["date"]));
@@ -654,8 +650,6 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                   final overtimeReason = d["overtimeReason"];
                   final deductionReason = d["deductionReason"];
 
-                  // Determine status display
-                  // ✅ FIX: Include "WORKING" status (new simplified system)
                   bool isWorking = (status == "CHECKED_IN" || status == "COMPLETED" || status == "WORKING");
                   bool isNotWorking = (status == "NOT_WORKING");
                   bool hasStatus = (status != "NOT_STARTED");

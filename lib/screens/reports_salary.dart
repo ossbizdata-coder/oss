@@ -65,8 +65,7 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
 
       users = jsonDecode(usersRes.body);
 
-      // ✅ Filter to only include specific user IDs for salary calculation
-      final allowedUserIds = [7, 8, 9, 47];
+      final allowedUserIds = [1, 7, 8, 9, 47];
       users = users.where((user) => allowedUserIds.contains(user['id'])).toList();
 
       final now = DateTime(selectedYear, selectedMonth);
@@ -84,24 +83,32 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body);
 
+          double unpaidCredits = 0.0;
+          try {
+            final creditsRes = await http.get(
+              Uri.parse('http://74.208.132.78/api/credits/user/$userId/summary'),
+              headers: token != null ? {"Authorization": "Bearer $token"} : {},
+            );
 
-          // Parse new fields with backward compatibility
+            if (creditsRes.statusCode == 200) {
+              final creditsData = jsonDecode(creditsRes.body);
+              unpaidCredits = (creditsData["unpaidCredits"] ?? 0).toDouble();
+            }
+          } catch (e) {
+          }
+
           final totalSalary = (data['totalSalary'] is num)
               ? data['totalSalary'].toDouble()
               : double.tryParse(data['totalSalary']?.toString() ?? '') ?? 0.0;
 
           final baseSalary = data.containsKey('baseSalary')
               ? ((data['baseSalary'] is num) ? data['baseSalary'].toDouble() : double.tryParse(data['baseSalary']?.toString() ?? '') ?? 0.0)
-              : totalSalary; // Fallback to totalSalary if baseSalary not present
-
-          final totalCredits = data.containsKey('totalCredits')
-              ? ((data['totalCredits'] is num) ? data['totalCredits'].toDouble() : double.tryParse(data['totalCredits']?.toString() ?? '') ?? 0.0)
-              : 0.0;
+              : totalSalary;
 
           userSalary[userId] = {
             'baseSalary': baseSalary,
-            'totalCredits': totalCredits,
-            'totalSalary': totalSalary,
+            'totalCredits': unpaidCredits,
+            'totalSalary': baseSalary - unpaidCredits,
             'totalHours': (data['totalHours'] is num) ? data['totalHours'].toDouble() : double.tryParse(data['totalHours']?.toString() ?? '') ?? 0.0,
             'hourlyRate': (data['hourlyRate'] is num) ? data['hourlyRate'].toDouble() : double.tryParse(data['hourlyRate']?.toString() ?? '') ?? 0.0,
             'dailyBreakdown': (data['dailyBreakdown'] is List) ? data['dailyBreakdown'] : [],
@@ -205,7 +212,6 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
     );
   }
 
-  /// ================= UI COMPONENTS =================
 
   Widget _userSalaryCard(dynamic user, dynamic salary) {
     return Padding(
@@ -273,7 +279,6 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
                     ),
                   ),
 
-                  // Show breakdown if credits exist
                   if ((salary['totalCredits'] ?? 0) > 0) ...[
                     const SizedBox(height: 12),
                     const Divider(),
@@ -304,7 +309,7 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
                             Icon(Icons.remove_circle_outline, size: 14, color: Colors.red.shade700),
                             const SizedBox(width: 4),
                             const Text(
-                              'Credits',
+                              'Unpaid Credits',
                               style: TextStyle(
                                 fontSize: 13,
                                 color: Colors.red,
@@ -359,7 +364,6 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
               final salaryVal = (d['salary'] ?? 0);
               final salaryDouble = (salaryVal is num) ? salaryVal.toDouble() : double.tryParse(salaryVal.toString()) ?? 0.0;
 
-              // Parse overtime and deduction
               final overtime = (d['overtimeHours'] ?? 0);
               final overtimeDouble = (overtime is num) ? overtime.toDouble() : double.tryParse(overtime.toString()) ?? 0.0;
               final deduction = (d['deductionHours'] ?? 0);
@@ -368,8 +372,6 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
               final deductionReason = d['deductionReason'];
               final status = d['status'] ?? 'UNKNOWN';
 
-
-              // Determine if worked
               final isWorked = (status == 'WORKING' || status == 'CHECKED_IN' || status == 'COMPLETED');
 
               return Container(
@@ -431,48 +433,111 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
                       ],
                     ),
 
-                    // Show overtime/deduction if exists
                     if (overtimeDouble > 0 || deductionDouble > 0) ...[
                       const SizedBox(height: 10),
                       const Divider(height: 1),
                       const SizedBox(height: 8),
 
                       if (overtimeDouble > 0) ...[
-                        Row(
-                          children: [
-                            Icon(Icons.add_circle_outline, size: 14, color: Colors.blue.shade700),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                'OT: ${overtimeDouble.toStringAsFixed(1)}h${overtimeReason != null && overtimeReason.toString().isNotEmpty ? ' - $overtimeReason' : ''}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.blue.shade700,
-                                  fontWeight: FontWeight.w500,
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green.shade200),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.add_circle_outline, size: 16, color: Colors.green.shade700),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Overtime: ${overtimeDouble.toStringAsFixed(1)} hrs × ${currency.format((salary['hourlyRate'] ?? 0).toDouble())}',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.green.shade700,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    if (overtimeReason != null && overtimeReason.toString().isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        overtimeReason.toString(),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.green.shade600,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
-                            ),
-                          ],
+                              Text(
+                                '+${currency.format(overtimeDouble * (salary['hourlyRate'] ?? 0).toDouble())}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.green.shade700,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        if (deductionDouble > 0) const SizedBox(height: 6),
+                        if (deductionDouble > 0) const SizedBox(height: 8),
                       ],
 
                       if (deductionDouble > 0) ...[
-                        Row(
-                          children: [
-                            Icon(Icons.remove_circle_outline, size: 14, color: Colors.orange.shade700),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                'Deduction: ${deductionDouble.toStringAsFixed(1)}h${deductionReason != null && deductionReason.toString().isNotEmpty ? ' - $deductionReason' : ''}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.orange.shade700,
-                                  fontWeight: FontWeight.w500,
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade200),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.remove_circle_outline, size: 16, color: Colors.red.shade700),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Deduction: ${deductionDouble.toStringAsFixed(1)} hrs × ${currency.format((salary['hourlyRate'] ?? 0).toDouble())}',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.red.shade700,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    if (deductionReason != null && deductionReason.toString().isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        deductionReason.toString(),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.red.shade600,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
-                            ),
-                          ],
+                              Text(
+                                '-${currency.format(deductionDouble * (salary['hourlyRate'] ?? 0).toDouble())}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.red.shade700,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ],

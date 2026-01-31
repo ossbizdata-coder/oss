@@ -238,9 +238,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
 
+  /// Check if today is Saturday (holiday)
+  bool _isSaturday() {
+    return DateTime.now().weekday == DateTime.saturday;
+  }
+
   /// ----------------- UI -----------------
   @override
   Widget build(BuildContext context) {
+    final isSaturday = _isSaturday();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Attendance"),
@@ -262,12 +269,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
         ],
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
+      body: SafeArea(
+        bottom: true,
+        child: loading
+            ? const Center(child: CircularProgressIndicator())
+            : Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), // Added extra bottom padding
+          child: Column(
+            children: [
             // ===== GREETING =====
             Column(
               children: [
@@ -308,14 +317,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 Expanded(
                   child: ElevatedButton(
                     // Enable YES button when:
+                    // - Not Saturday (holiday)
                     // - Not currently submitting
                     // - Status is NOT_STARTED (first time) OR NOT_WORKING (switching from NO to YES)
                     // Disable when already CHECKED_IN, WORKING, or COMPLETED
-                    onPressed: (!submitting && (workStatus == "NOT_STARTED" || workStatus == "NOT_WORKING")) ? _checkIn : null,
+                    onPressed: (!isSaturday && !submitting && (workStatus == "NOT_STARTED" || workStatus == "NOT_WORKING")) ? _checkIn : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: isWorking ? Colors.green.shade600 : Colors.green.shade400,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: isWorking ? Colors.green.shade600 : Colors.grey.shade400,
+                      disabledBackgroundColor: isSaturday ? Colors.grey.shade400 : (isWorking ? Colors.green.shade600 : Colors.grey.shade400),
                       disabledForegroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       shape: RoundedRectangleBorder(
@@ -346,14 +356,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 Expanded(
                   child: ElevatedButton(
                     // Enable NO button when:
+                    // - Not Saturday (holiday)
                     // - Not currently submitting
                     // - Status is NOT_STARTED (first time) OR any working status (CHECKED_IN, WORKING, COMPLETED)
                     // Disable when already NOT_WORKING
-                    onPressed: (!submitting && workStatus != "NOT_WORKING") ? _markNotWorking : null,
+                    onPressed: (!isSaturday && !submitting && workStatus != "NOT_WORKING") ? _markNotWorking : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: !isWorking ? Colors.red.shade600 : Colors.red.shade400,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: !isWorking ? Colors.red.shade600 : Colors.grey.shade400,
+                      disabledBackgroundColor: isSaturday ? Colors.grey.shade400 : (!isWorking ? Colors.red.shade600 : Colors.grey.shade400),
                       disabledForegroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       shape: RoundedRectangleBorder(
@@ -382,6 +393,56 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
               ],
             ),
+
+            // ===== HOLIDAY MESSAGE (Saturday) =====
+            if (isSaturday) ...[
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.orange.shade300,
+                    width: 2,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.weekend,
+                      color: Colors.orange.shade700,
+                      size: 28,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "It's Saturday - Holiday!",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade800,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "Attendance marking is disabled on Saturdays. Enjoy your day off!",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             // Current status indicator - only show if user has made a selection
             if (workStatus != "NOT_STARTED") ...[
@@ -593,6 +654,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

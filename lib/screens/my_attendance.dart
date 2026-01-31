@@ -38,9 +38,6 @@ class _MyAttendanceReportScreenState
 
   Future<void> fetchAttendance() async {
     try {
-      print("DEBUG: Fetching attendance history...");
-
-      // Try the /history endpoint first
       var res = await http.get(
         Uri.parse("http://74.208.132.78/api/attendance/history"),
         headers: {
@@ -49,13 +46,7 @@ class _MyAttendanceReportScreenState
         },
       );
 
-      print("DEBUG: Attendance response status: ${res.statusCode}");
-
-      // If 403, the endpoint might not exist - show helpful message
       if (res.statusCode == 403) {
-        print("DEBUG: 403 Forbidden - endpoint blocked or doesn't exist");
-        print("DEBUG: This usually means the backend endpoint needs to be implemented");
-
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -68,35 +59,14 @@ class _MyAttendanceReportScreenState
         return;
       }
 
-      print("DEBUG: Attendance response body: ${res.body}");
-
       if (res.statusCode == 200) {
         if (res.body.isEmpty || res.body == 'null') {
-          print("DEBUG: Empty response body");
           setState(() => attendanceList = []);
           return;
         }
 
         final decoded = jsonDecode(res.body);
-        print("DEBUG: Decoded data type: ${decoded.runtimeType}");
 
-        // Debug: Print first record structure if available
-        if (decoded is List && decoded.isNotEmpty) {
-          print("DEBUG: First record structure: ${decoded[0]}");
-          print("DEBUG: First record keys: ${(decoded[0] as Map).keys.toList()}");
-          print("DEBUG: overtimeHours value: ${decoded[0]['overtimeHours']}, type: ${decoded[0]['overtimeHours'].runtimeType}");
-          print("DEBUG: deductionHours value: ${decoded[0]['deductionHours']}, type: ${decoded[0]['deductionHours'].runtimeType}");
-        } else if (decoded is Map && decoded.containsKey('data')) {
-          final data = decoded['data'];
-          if (data is List && data.isNotEmpty) {
-            print("DEBUG: First record structure: ${data[0]}");
-            print("DEBUG: First record keys: ${(data[0] as Map).keys.toList()}");
-            print("DEBUG: overtimeHours value: ${data[0]['overtimeHours']}, type: ${data[0]['overtimeHours'].runtimeType}");
-            print("DEBUG: deductionHours value: ${data[0]['deductionHours']}, type: ${data[0]['deductionHours'].runtimeType}");
-          }
-        }
-
-        // Get today's date as timestamp (start of day for comparison)
         final today = DateTime.now();
         final todayStartOfDay = DateTime(today.year, today.month, today.day, 0, 0, 0);
         final todayTimestamp = todayStartOfDay.millisecondsSinceEpoch;
@@ -113,7 +83,18 @@ class _MyAttendanceReportScreenState
               recordDate = DateTime.fromMillisecondsSinceEpoch(workDate);
             } else if (workDate is String) {
               try {
-                recordDate = DateTime.parse(workDate);
+                // Handle SQL date format (YYYY-MM-DD)
+                if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
+                  final parts = workDate.split('-');
+                  recordDate = DateTime(
+                    int.parse(parts[0]), // year
+                    int.parse(parts[1]), // month
+                    int.parse(parts[2]), // day
+                  );
+                } else {
+                  // ISO datetime or other format
+                  recordDate = DateTime.parse(workDate);
+                }
               } catch (e) {
                 try {
                   recordDate = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
@@ -141,7 +122,18 @@ class _MyAttendanceReportScreenState
               dateTime = DateTime.fromMillisecondsSinceEpoch(workDate);
             } else if (workDate is String) {
               try {
-                dateTime = DateTime.parse(workDate);
+                // Handle SQL date format (YYYY-MM-DD)
+                if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
+                  final parts = workDate.split('-');
+                  dateTime = DateTime(
+                    int.parse(parts[0]), // year
+                    int.parse(parts[1]), // month
+                    int.parse(parts[2]), // day
+                  );
+                } else {
+                  // ISO datetime or other format
+                  dateTime = DateTime.parse(workDate);
+                }
               } catch (e) {
                 try {
                   dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
@@ -156,14 +148,9 @@ class _MyAttendanceReportScreenState
             // Create date key (YYYY-MM-DD)
             final dateKey = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
 
-            // ✅ FIX: Always REPLACE to keep last occurrence (most recent from backend)
-            // The /history endpoint doesn't return 'id' field, so we can't compare IDs
-            // Backend returns older records first, so last occurrence = most recent action
             uniqueRecords[dateKey] = record;
-            print("DEBUG: Date $dateKey - Updating with status=${record['status']}");
           }
 
-          // Convert back to list and sort by workDate in descending order
           final deduplicated = uniqueRecords.values.toList();
           deduplicated.sort((a, b) {
             final timestampA = _getTimestamp(a['workDate']);
@@ -172,32 +159,6 @@ class _MyAttendanceReportScreenState
           });
 
           setState(() => attendanceList = deduplicated);
-
-          // Debug: Show all unique dates we have records for
-          print("DEBUG: Loaded ${attendanceList.length} unique attendance records up to today (sorted DESC)");
-          print("DEBUG: Dates with records:");
-          for (var record in deduplicated.take(5)) {
-            final workDate = record['workDate'];
-            final dateTime = workDate is int
-                ? DateTime.fromMillisecondsSinceEpoch(workDate)
-                : DateTime.parse(workDate.toString());
-            final dateStr = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
-            final status = record['status'];
-            final isWorking = record['isWorking'];
-            print("DEBUG:   $dateStr - status=$status, isWorking=$isWorking");
-          }
-
-          // Check if we have a record for today
-          final todayDateStr = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
-          final hasToday = deduplicated.any((r) {
-            final workDate = r['workDate'];
-            final dateTime = workDate is int
-                ? DateTime.fromMillisecondsSinceEpoch(workDate)
-                : DateTime.parse(workDate.toString());
-            final dateStr = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
-            return dateStr == todayDateStr;
-          });
-          print("DEBUG: Has record for TODAY ($todayDateStr)? $hasToday");
         } else if (decoded is Map && decoded.containsKey('data')) {
           // Filter records up to today only
           final filtered = List<dynamic>.from(decoded['data'] ?? []).where((record) {
@@ -238,7 +199,18 @@ class _MyAttendanceReportScreenState
               dateTime = DateTime.fromMillisecondsSinceEpoch(workDate);
             } else if (workDate is String) {
               try {
-                dateTime = DateTime.parse(workDate);
+                // Handle SQL date format (YYYY-MM-DD)
+                if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
+                  final parts = workDate.split('-');
+                  dateTime = DateTime(
+                    int.parse(parts[0]), // year
+                    int.parse(parts[1]), // month
+                    int.parse(parts[2]), // day
+                  );
+                } else {
+                  // ISO datetime or other format
+                  dateTime = DateTime.parse(workDate);
+                }
               } catch (e) {
                 try {
                   dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
@@ -253,14 +225,9 @@ class _MyAttendanceReportScreenState
             // Create date key (YYYY-MM-DD)
             final dateKey = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
 
-            // ✅ FIX: Always REPLACE to keep last occurrence (most recent from backend)
-            // The /history endpoint doesn't return 'id' field, so we can't compare IDs
-            // Backend returns older records first, so last occurrence = most recent action
             uniqueRecords[dateKey] = record;
-            print("DEBUG: Date $dateKey - Updating with status=${record['status']}");
           }
 
-          // Convert back to list and sort by workDate in descending order
           final deduplicated = uniqueRecords.values.toList();
           deduplicated.sort((a, b) {
             final timestampA = _getTimestamp(a['workDate']);
@@ -269,13 +236,10 @@ class _MyAttendanceReportScreenState
           });
 
           setState(() => attendanceList = deduplicated);
-          print("DEBUG: Loaded ${attendanceList.length} unique attendance records from 'data' field up to today (sorted DESC)");
         } else {
-          print("DEBUG: Unexpected response format: $decoded");
           setState(() => attendanceList = []);
         }
       } else {
-        print("DEBUG: Failed with status ${res.statusCode}");
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("Failed to load attendance: ${res.statusCode}")),
@@ -283,7 +247,6 @@ class _MyAttendanceReportScreenState
         }
       }
     } catch (e) {
-      print("DEBUG: Error fetching attendance: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error loading attendance: $e")),
@@ -298,7 +261,19 @@ class _MyAttendanceReportScreenState
       return workDate;
     } else if (workDate is String) {
       try {
-        return DateTime.parse(workDate).millisecondsSinceEpoch;
+        // Handle SQL date format (YYYY-MM-DD)
+        if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
+          final parts = workDate.split('-');
+          final date = DateTime(
+            int.parse(parts[0]), // year
+            int.parse(parts[1]), // month
+            int.parse(parts[2]), // day
+          );
+          return date.millisecondsSinceEpoch;
+        } else {
+          // ISO datetime or other format
+          return DateTime.parse(workDate).millisecondsSinceEpoch;
+        }
       } catch (e) {
         try {
           return int.parse(workDate);
@@ -310,23 +285,33 @@ class _MyAttendanceReportScreenState
     return 0;
   }
 
-  // 📅 Date formatter - handles both ISO date strings and timestamps
   String formatDate(dynamic dateValue) {
     DateTime d;
 
     if (dateValue is int) {
-      // Handle timestamp in milliseconds
       d = DateTime.fromMillisecondsSinceEpoch(dateValue).toLocal();
     } else if (dateValue is String) {
-      // Try parsing as ISO date string first
       try {
-        d = DateTime.parse(dateValue).toLocal();
+        if (dateValue.contains('T')) {
+          d = DateTime.parse(dateValue).toLocal();
+        } else if (dateValue.contains('-') && dateValue.length == 10) {
+          final parts = dateValue.split('-');
+          if (parts.length == 3) {
+            d = DateTime(
+              int.parse(parts[0]),
+              int.parse(parts[1]),
+              int.parse(parts[2]),
+            );
+          } else {
+            throw FormatException('Invalid date format');
+          }
+        } else {
+          d = DateTime.parse(dateValue).toLocal();
+        }
       } catch (e) {
-        // If parsing fails, try as timestamp string
         try {
           d = DateTime.fromMillisecondsSinceEpoch(int.parse(dateValue)).toLocal();
         } catch (e2) {
-          print("DEBUG: Failed to parse date: $dateValue");
           return dateValue.toString();
         }
       }
@@ -340,15 +325,11 @@ class _MyAttendanceReportScreenState
   }
 
   Map<String, dynamic> determineStatus(Map a) {
-    // ✅ NEW SIMPLIFIED LOGIC: Check is_working flag first (if available)
-    // Backend now uses is_working boolean flag (true = worked, false = didn't work)
-
     final isWorking = a["isWorking"];
     String statusText;
     Color statusColor;
     IconData statusIcon;
 
-    // Priority 1: Check is_working flag (new simplified backend)
     if (isWorking != null) {
       if (isWorking == true || isWorking == 1) {
         statusText = "WORKED";
@@ -360,7 +341,6 @@ class _MyAttendanceReportScreenState
         statusIcon = Icons.cancel;
       }
     }
-    // Priority 2: Fallback to old status field for backward compatibility
     else {
       final status = a["status"];
 
@@ -369,7 +349,6 @@ class _MyAttendanceReportScreenState
         statusColor = Colors.red;
         statusIcon = Icons.cancel;
       } else {
-        // WORKING, CHECKED_IN, COMPLETED all mean user selected YES (worked)
         statusText = "WORKED";
         statusColor = Colors.green;
         statusIcon = Icons.check_circle;
@@ -401,12 +380,9 @@ class _MyAttendanceReportScreenState
       appBar: AppBar(
         title: const Text("My Attendance Report"),
       ),
-      // ✅ ADD: Floating button to create today's record if missing
       floatingActionButton: !loading && !hasToday ? FloatingActionButton.extended(
         onPressed: () async {
-          // Navigate to attendance screen to mark today
           await Navigator.pushNamed(context, '/attendance');
-          // Reload after coming back
           await fetchAttendance();
         },
         icon: const Icon(Icons.add),
@@ -502,7 +478,6 @@ class _MyAttendanceReportScreenState
                                 }
                               }
 
-                              print("DEBUG: Record ${a["workDate"]} - OT: $overtimeValue, Deduction: $deductionValue");
 
                               final hasOvertime = overtimeValue != null && overtimeValue > 0;
                               final hasDeduction = deductionValue != null && deductionValue > 0;
