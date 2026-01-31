@@ -57,6 +57,12 @@ class _MainMenuState extends State<MainMenu> {
         "roles": ["SUPERADMIN"]
       },
       {
+        "text": "Audit Logs",
+        "icon": Icons.history,
+        "route": "/audit-logs",
+        "roles": ["SUPERADMIN"]
+      },
+      {
         "text": "Idea of the Week",
         "icon": Icons.lightbulb_outline_rounded,
         "route": "/idea-of-the-week",

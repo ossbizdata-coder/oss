@@ -30,6 +30,10 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
 
 
   Future<void> fetchAttendanceForAllUsers() async {
+    print('═══════════════════════════════════════════════════════');
+    print('📊 FETCH ATTENDANCE FOR ALL USERS - Starting');
+    print('═══════════════════════════════════════════════════════');
+
     setState(() {
       loading = true;
       error = null;
@@ -39,8 +43,17 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
       final prefs = await SharedPreferences.getInstance();
       final role = prefs.getString("role");
       final token = prefs.getString("token");
+      final userId = prefs.getInt("userId");
+
+      print('🔐 Auth Check:');
+      print('   - User ID: $userId');
+      print('   - Role: $role');
+      print('   - Token exists: ${token != null}');
+      print('   - Token length: ${token?.length ?? 0}');
 
       if (role != "SUPERADMIN") {
+        print('❌ ACCESS DENIED - User is not SUPERADMIN');
+        print('   - Current role: $role');
         setState(() {
           error = "Access denied: Super Admins only";
           loading = false;
@@ -48,12 +61,25 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
         return;
       }
 
+      print('✅ Access granted - User is SUPERADMIN');
+      print('───────────────────────────────────────────────────────');
+      print('📤 Fetching Users...');
+      print('   - URL: http://74.208.132.78/api/users');
+      print('   - Method: GET');
+
       final usersRes = await http.get(
         Uri.parse('http://74.208.132.78/api/users'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
+      print('📥 Users API Response:');
+      print('   - Status Code: ${usersRes.statusCode}');
+      print('   - Response Length: ${usersRes.body.length} bytes');
+
       if (usersRes.statusCode != 200) {
+        print('❌ Failed to load users');
+        print('   - Status: ${usersRes.statusCode}');
+        print('   - Body: ${usersRes.body}');
         setState(() {
           error = "Failed to load users (Status: ${usersRes.statusCode})";
           loading = false;
@@ -63,10 +89,21 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
 
       try {
         final allUsers = List<Map<String, dynamic>>.from(jsonDecode(usersRes.body));
+        print('✅ Users parsed successfully');
+        print('   - Total users: ${allUsers.length}');
+
         users = allUsers.where((user) =>
           user['role'] == 'ADMIN' || user['id'] == 1
         ).toList();
+
+        print('   - Filtered users (ADMIN or ID=1): ${users.length}');
+        for (var user in users) {
+          print('      • ${user['name']} (ID: ${user['id']}, Role: ${user['role']})');
+        }
       } catch (e) {
+        print('❌ Failed to parse users data');
+        print('   - Error: $e');
+        print('   - Raw response: ${usersRes.body.substring(0, usersRes.body.length > 200 ? 200 : usersRes.body.length)}...');
         setState(() {
           error = "Failed to parse users data: $e";
           loading = false;
@@ -74,12 +111,24 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
         return;
       }
 
+      print('───────────────────────────────────────────────────────');
+      print('📤 Fetching Attendance Records...');
+      print('   - URL: http://74.208.132.78/api/attendance/all');
+      print('   - Method: GET');
+
       final attRes = await http.get(
         Uri.parse('http://74.208.132.78/api/attendance/all'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
+      print('📥 Attendance API Response:');
+      print('   - Status Code: ${attRes.statusCode}');
+      print('   - Response Length: ${attRes.body.length} bytes');
+
       if (attRes.statusCode != 200) {
+        print('❌ Failed to load attendance');
+        print('   - Status: ${attRes.statusCode}');
+        print('   - Body: ${attRes.body}');
         setState(() {
           error = "Failed to load attendance (Status: ${attRes.statusCode})";
           loading = false;
@@ -90,7 +139,12 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
       final List allAttendance;
       try {
         allAttendance = jsonDecode(attRes.body);
+        print('✅ Attendance data parsed successfully');
+        print('   - Total records: ${allAttendance.length}');
       } catch (e) {
+        print('❌ Failed to parse attendance data');
+        print('   - Error: $e');
+        print('   - Raw response: ${attRes.body.substring(0, attRes.body.length > 200 ? 200 : attRes.body.length)}...');
         setState(() {
           error = "Failed to parse attendance data: $e";
           loading = false;
@@ -98,26 +152,68 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
         return;
       }
 
+      print('───────────────────────────────────────────────────────');
+      print('🔄 Processing Attendance Records...');
+
       userAttendance.clear();
+      int processedCount = 0;
+      int skippedCount = 0;
+
       for (var att in allAttendance) {
         final userId = int.tryParse(
           att['userId']?.toString() ?? att['user']?['id']?.toString() ?? '',
         );
-        if (userId == null) continue;
+
+        if (userId == null) {
+          skippedCount++;
+          print('⚠️ Skipped record - no valid userId');
+          print('   - Record: ${att.toString().substring(0, att.toString().length > 100 ? 100 : att.toString().length)}...');
+          continue;
+        }
 
         userAttendance.putIfAbsent(userId, () => []).add(att);
+        processedCount++;
+
+        // Log first few records for debugging
+        if (processedCount <= 3) {
+          print('   ✓ Record #$processedCount:');
+          print('      - User ID: $userId');
+          print('      - Attendance ID: ${att['id']}');
+          print('      - Work Date: ${att['workDate']}');
+          print('      - Status: ${att['status']}');
+        }
       }
+
+      print('✅ Processing complete');
+      print('   - Processed: $processedCount');
+      print('   - Skipped: $skippedCount');
+      print('   - Users with attendance: ${userAttendance.length}');
+
+      print('───────────────────────────────────────────────────────');
+      print('📋 Sorting attendance records...');
 
       userAttendance.forEach((key, list) {
         list.sort((a, b) {
-          DateTime dateA = DateTime.tryParse(a['workDate'] ?? '') ?? DateTime(2000);
-          DateTime dateB = DateTime.tryParse(b['workDate'] ?? '') ?? DateTime(2000);
+          DateTime dateA = DateTime.tryParse(a['workDate'] ?? '')?.toUtc() ?? DateTime(2000);
+          DateTime dateB = DateTime.tryParse(b['workDate'] ?? '')?.toUtc() ?? DateTime(2000);
           return dateB.compareTo(dateA);
         });
       });
 
+      print('✅ Sorting complete');
+      print('═══════════════════════════════════════════════════════');
+      print('✨ FETCH COMPLETED SUCCESSFULLY');
+      print('═══════════════════════════════════════════════════════');
+
       setState(() => loading = false);
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('❌ EXCEPTION CAUGHT!');
+      print('   - Error Type: ${e.runtimeType}');
+      print('   - Error Message: $e');
+      print('   - Stack Trace:');
+      print(stackTrace);
+      print('═══════════════════════════════════════════════════════');
+
       setState(() {
         error = "Error: $e";
         loading = false;
@@ -223,8 +319,7 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
                   if (att['workDate'] != null) {
                     workDate = DateTime.parse(
                         att['workDate'])
-                        .toUtc()
-                        .toLocal();
+                        .toUtc();
                   }
                   status = att['status']?.toString();
                 } catch (_) {}
@@ -340,6 +435,17 @@ class _ReportsAttendanceScreenState extends State<ReportsAttendanceScreen> {
               IconButton(
                 icon: const Icon(Icons.edit, size: 20),
                 onPressed: () {
+                  print('───────────────────────────────────────────────────────');
+                  print('✏️ EDIT BUTTON CLICKED');
+                  print('   - User Name: $userName');
+                  print('   - Work Date: ${attendanceData['workDate']}');
+                  print('   - Attendance ID: ${attendanceData['id']}');
+                  print('   - Status: ${attendanceData['status']}');
+                  print('   - Overtime: ${attendanceData['overtimeHours']}');
+                  print('   - Deduction: ${attendanceData['deductionHours']}');
+                  print('   - Full Data: $attendanceData');
+                  print('───────────────────────────────────────────────────────');
+
                   showDialog(
                     context: context,
                     builder: (ctx) => AttendanceAdjustmentDialog(

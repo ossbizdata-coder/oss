@@ -72,32 +72,28 @@ class _MyAttendanceReportScreenState
         final todayTimestamp = todayStartOfDay.millisecondsSinceEpoch;
 
         if (decoded is List) {
-          // Filter records up to today only (exclude future dates)
-          final filtered = List<dynamic>.from(decoded).where((record) {
+          final filtered = decoded.where((record) {
             final workDate = record['workDate'];
             if (workDate == null) return false;
 
-            // Parse workDate to DateTime
             DateTime recordDate;
             if (workDate is int) {
-              recordDate = DateTime.fromMillisecondsSinceEpoch(workDate);
+              recordDate = DateTime.fromMillisecondsSinceEpoch(workDate, isUtc: true);
             } else if (workDate is String) {
               try {
-                // Handle SQL date format (YYYY-MM-DD)
                 if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
                   final parts = workDate.split('-');
-                  recordDate = DateTime(
-                    int.parse(parts[0]), // year
-                    int.parse(parts[1]), // month
-                    int.parse(parts[2]), // day
+                  recordDate = DateTime.utc(
+                    int.parse(parts[0]),
+                    int.parse(parts[1]),
+                    int.parse(parts[2]),
                   );
                 } else {
-                  // ISO datetime or other format
-                  recordDate = DateTime.parse(workDate);
+                  recordDate = DateTime.parse(workDate).toUtc();
                 }
               } catch (e) {
                 try {
-                  recordDate = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
+                  recordDate = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate), isUtc: true);
                 } catch (e2) {
                   return false;
                 }
@@ -106,37 +102,31 @@ class _MyAttendanceReportScreenState
               return false;
             }
 
-            // Only include if date is today or in the past (exclude future dates)
-            final recordDateOnly = DateTime(recordDate.year, recordDate.month, recordDate.day);
-            final todayDateOnly = DateTime(today.year, today.month, today.day);
-            return !recordDateOnly.isAfter(todayDateOnly);
+            return recordDate.millisecondsSinceEpoch <= todayTimestamp;
           }).toList();
 
-          // Deduplicate: Group by date (ignoring time) and keep the most recent record per date
           final Map<String, dynamic> uniqueRecords = {};
           for (var record in filtered) {
             final workDate = record['workDate'];
             DateTime dateTime;
 
             if (workDate is int) {
-              dateTime = DateTime.fromMillisecondsSinceEpoch(workDate);
+              dateTime = DateTime.fromMillisecondsSinceEpoch(workDate, isUtc: true);
             } else if (workDate is String) {
               try {
-                // Handle SQL date format (YYYY-MM-DD)
                 if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
                   final parts = workDate.split('-');
-                  dateTime = DateTime(
-                    int.parse(parts[0]), // year
-                    int.parse(parts[1]), // month
-                    int.parse(parts[2]), // day
+                  dateTime = DateTime.utc(
+                    int.parse(parts[0]),
+                    int.parse(parts[1]),
+                    int.parse(parts[2]),
                   );
                 } else {
-                  // ISO datetime or other format
-                  dateTime = DateTime.parse(workDate);
+                  dateTime = DateTime.parse(workDate).toUtc();
                 }
               } catch (e) {
                 try {
-                  dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
+                  dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate), isUtc: true);
                 } catch (e2) {
                   continue;
                 }
@@ -145,7 +135,6 @@ class _MyAttendanceReportScreenState
               continue;
             }
 
-            // Create date key (YYYY-MM-DD)
             final dateKey = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
 
             uniqueRecords[dateKey] = record;
@@ -160,7 +149,6 @@ class _MyAttendanceReportScreenState
 
           setState(() => attendanceList = deduplicated);
         } else if (decoded is Map && decoded.containsKey('data')) {
-          // Filter records up to today only
           final filtered = List<dynamic>.from(decoded['data'] ?? []).where((record) {
             final workDate = record['workDate'];
             if (workDate == null) return false;
@@ -189,31 +177,34 @@ class _MyAttendanceReportScreenState
             return recordTimestamp <= todayTimestamp;
           }).toList();
 
-          // Deduplicate: Group by date (ignoring time) and keep the most recent record per date
           final Map<String, dynamic> uniqueRecords = {};
           for (var record in filtered) {
             final workDate = record['workDate'];
             DateTime dateTime;
 
             if (workDate is int) {
-              dateTime = DateTime.fromMillisecondsSinceEpoch(workDate);
+              dateTime = DateTime.fromMillisecondsSinceEpoch(workDate, isUtc: true);
             } else if (workDate is String) {
               try {
-                // Handle SQL date format (YYYY-MM-DD)
-                if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
+                if (workDate.contains('T')) {
+                  dateTime = DateTime.parse(workDate).toUtc();
+                } else if (workDate.contains('-') && workDate.length == 10) {
                   final parts = workDate.split('-');
-                  dateTime = DateTime(
-                    int.parse(parts[0]), // year
-                    int.parse(parts[1]), // month
-                    int.parse(parts[2]), // day
-                  );
+                  if (parts.length == 3) {
+                    dateTime = DateTime.utc(
+                      int.parse(parts[0]),
+                      int.parse(parts[1]),
+                      int.parse(parts[2]),
+                    );
+                  } else {
+                    throw FormatException('Invalid date format');
+                  }
                 } else {
-                  // ISO datetime or other format
-                  dateTime = DateTime.parse(workDate);
+                  dateTime = DateTime.parse(workDate).toUtc();
                 }
               } catch (e) {
                 try {
-                  dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate));
+                  dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(workDate), isUtc: true);
                 } catch (e2) {
                   continue;
                 }
@@ -222,7 +213,6 @@ class _MyAttendanceReportScreenState
               continue;
             }
 
-            // Create date key (YYYY-MM-DD)
             final dateKey = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
 
             uniqueRecords[dateKey] = record;
@@ -261,19 +251,7 @@ class _MyAttendanceReportScreenState
       return workDate;
     } else if (workDate is String) {
       try {
-        // Handle SQL date format (YYYY-MM-DD)
-        if (workDate.contains('-') && workDate.length == 10 && !workDate.contains('T')) {
-          final parts = workDate.split('-');
-          final date = DateTime(
-            int.parse(parts[0]), // year
-            int.parse(parts[1]), // month
-            int.parse(parts[2]), // day
-          );
-          return date.millisecondsSinceEpoch;
-        } else {
-          // ISO datetime or other format
-          return DateTime.parse(workDate).millisecondsSinceEpoch;
-        }
+        return DateTime.parse(workDate).toUtc().millisecondsSinceEpoch;
       } catch (e) {
         try {
           return int.parse(workDate);
@@ -289,15 +267,15 @@ class _MyAttendanceReportScreenState
     DateTime d;
 
     if (dateValue is int) {
-      d = DateTime.fromMillisecondsSinceEpoch(dateValue).toLocal();
+      d = DateTime.fromMillisecondsSinceEpoch(dateValue, isUtc: true);
     } else if (dateValue is String) {
       try {
         if (dateValue.contains('T')) {
-          d = DateTime.parse(dateValue).toLocal();
+          d = DateTime.parse(dateValue).toUtc();
         } else if (dateValue.contains('-') && dateValue.length == 10) {
           final parts = dateValue.split('-');
           if (parts.length == 3) {
-            d = DateTime(
+            d = DateTime.utc(
               int.parse(parts[0]),
               int.parse(parts[1]),
               int.parse(parts[2]),
@@ -306,17 +284,17 @@ class _MyAttendanceReportScreenState
             throw FormatException('Invalid date format');
           }
         } else {
-          d = DateTime.parse(dateValue).toLocal();
+          d = DateTime.parse(dateValue).toUtc();
         }
       } catch (e) {
         try {
-          d = DateTime.fromMillisecondsSinceEpoch(int.parse(dateValue)).toLocal();
+          d = DateTime.fromMillisecondsSinceEpoch(int.parse(dateValue), isUtc: true);
         } catch (e2) {
           return dateValue.toString();
         }
       }
     } else {
-      return dateValue.toString();
+      return 'N/A';
     }
 
     return "${d.day.toString().padLeft(2, '0')}-"
@@ -364,14 +342,17 @@ class _MyAttendanceReportScreenState
 
   @override
   Widget build(BuildContext context) {
-    // Check if we have a record for today
     final today = DateTime.now();
     final todayDateStr = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+
     final hasToday = attendanceList.any((r) {
       final workDate = r['workDate'];
-      final dateTime = workDate is int
-          ? DateTime.fromMillisecondsSinceEpoch(workDate)
-          : DateTime.parse(workDate.toString());
+      DateTime dateTime;
+      if (workDate is int) {
+        dateTime = DateTime.fromMillisecondsSinceEpoch(workDate, isUtc: true);
+      } else {
+        dateTime = DateTime.parse(workDate.toString()).toUtc();
+      }
       final dateStr = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
       return dateStr == todayDateStr;
     });

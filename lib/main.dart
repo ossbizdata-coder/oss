@@ -1,6 +1,7 @@
 import 'package:OSS/screens/all_users.dart';
 import 'package:flutter/material.dart';
 import 'package:OSS/screens/attendence.dart';
+import 'package:OSS/screens/audit_logs.dart';
 import 'package:OSS/screens/diagnostic_screen.dart';
 import 'package:OSS/screens/idea_of_the_week.dart';
 import 'package:OSS/screens/idea_of_the_week_summary.dart';
@@ -64,6 +65,7 @@ class OneStopDailyApp extends StatelessWidget {
               "/reports-attendance": (_) => const ReportsAttendanceScreen(),
               "/reports-salary": (_) => const ReportsSalaryScreen(),
               "/improvements-summary": (_) => const ImprovementsSummaryScreen(),
+              "/audit-logs": (_) => const AuditLogsScreen(),
               "/diagnostic": (_) => const DiagnosticScreen(),
               "/pin-setup": (_) => const PinSetupScreen(),
               "/pin-entry": (context) => PinEntryScreen(

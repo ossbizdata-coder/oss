@@ -357,8 +357,11 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
             ),
             const SizedBox(height: 10),
 
-            ...((salary['dailyBreakdown'] ?? []) as List).map((d) {
-              final date = DateTime.tryParse(d['date'] ?? '');
+            ...((salary['dailyBreakdown'] ?? []) as List).where((d) {
+              final status = d['status'] ?? 'NOT_STARTED';
+              return status != 'NOT_STARTED';
+            }).map((d) {
+              final date = DateTime.tryParse(d['date'] ?? '')?.toUtc();
               final hours = (d['hours'] ?? d['workedHours'] ?? 0);
               final hoursDouble = (hours is num) ? hours.toDouble() : double.tryParse(hours.toString()) ?? 0.0;
               final salaryVal = (d['salary'] ?? 0);

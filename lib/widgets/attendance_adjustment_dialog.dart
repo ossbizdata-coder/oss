@@ -56,56 +56,160 @@ class _AttendanceAdjustmentDialogState
     final overtime = double.tryParse(_overtimeController.text) ?? 0;
     final deduction = double.tryParse(_deductionController.text) ?? 0;
 
+    print('═══════════════════════════════════════════════════════');
+    print('📝 ATTENDANCE ADJUSTMENT - Starting Save Process');
+    print('═══════════════════════════════════════════════════════');
+
     setState(() => _saving = true);
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString("token");
+      final role = prefs.getString("role");
+      final userId = prefs.getInt("userId");
       final attendanceId = widget.attendance['id'];
 
-      // First update status if changed
+      print('🔐 Auth Details:');
+      print('   - User ID: $userId');
+      print('   - Role: $role');
+      print('   - Token exists: ${token != null}');
+      print('   - Token length: ${token?.length ?? 0}');
+      if (token != null && token.length > 20) {
+        print('   - Token preview: ${token.substring(0, 20)}...');
+      }
+
+      print('📊 Attendance Record:');
+      print('   - User Name: ${widget.attendance['userName']}');
+      print('   - Work Date: ${widget.attendance['workDate']}');
+      print('   - User ID: ${widget.attendance['userId']}');
+      print('   - Current Status: ${widget.attendance['status']}');
+      print('   - New Status: $_selectedStatus');
+
+      print('⏱️ Adjustment Values:');
+      print('   - Overtime Hours: $overtime');
+      print('   - Overtime Reason: ${_overtimeReasonController.text.trim()}');
+      print('   - Deduction Hours: $deduction');
+      print('   - Deduction Reason: ${_deductionReasonController.text.trim()}');
+
+
+      // Get userId and workDate for composite key approach
+      final targetUserId = widget.attendance['userId'];
+      final workDate = widget.attendance['workDate'];
+
+      print('🔑 Using Composite Key Approach:');
+      print('   - User ID: $targetUserId');
+      print('   - Work Date: $workDate');
+
+      if (targetUserId == null || workDate == null) {
+        print('❌ ERROR: Missing userId or workDate for composite key!');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Error: Missing user ID or work date'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        setState(() => _saving = false);
+        return;
+      }
+
       final currentStatus = widget.attendance['status'] ?? 'WORKING';
       if (_selectedStatus != currentStatus) {
+        print('───────────────────────────────────────────────────────');
+        print('🔄 STATUS UPDATE REQUIRED');
+        print('   - From: $currentStatus → To: $_selectedStatus');
+
+        // Use composite key endpoint: userId and date in query params or body
+        final statusUrl = 'http://74.208.132.78/api/attendance/update-status';
+        final statusBody = jsonEncode({
+          'userId': targetUserId,
+          'workDate': workDate,
+          'status': _selectedStatus,
+        });
+
+        print('📤 API Request - Update Status:');
+        print('   - URL: $statusUrl');
+        print('   - Method: PUT');
+        print('   - Headers: Content-Type: application/json, Authorization: Bearer {token}');
+        print('   - Body: $statusBody');
+
         final statusResponse = await http.put(
-          Uri.parse('http://74.208.132.78/api/attendance/$attendanceId/status'),
+          Uri.parse(statusUrl),
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token',
           },
-          body: jsonEncode({
-            'status': _selectedStatus,
-          }),
+          body: statusBody,
         );
 
+        print('📥 API Response - Update Status:');
+        print('   - Status Code: ${statusResponse.statusCode}');
+        print('   - Response Body: ${statusResponse.body}');
+        print('   - Headers: ${statusResponse.headers}');
+
         if (statusResponse.statusCode != 200) {
+          print('❌ Status update FAILED!');
+          print('   - Expected: 200, Got: ${statusResponse.statusCode}');
+          print('   - Error Response: ${statusResponse.body}');
+
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Failed to update status: ${statusResponse.body}'),
+                content: Text('Failed to update status: ${statusResponse.statusCode} - ${statusResponse.body}'),
                 backgroundColor: Colors.red,
+                duration: const Duration(seconds: 7),
               ),
             );
           }
+          setState(() => _saving = false);
           return;
         }
+        print('✅ Status update SUCCESS');
+      } else {
+        print('ℹ️ Status unchanged - skipping status update');
       }
 
-      // Then update adjustments
+      print('───────────────────────────────────────────────────────');
+      print('🔄 ADJUSTMENTS UPDATE');
+
+      // Use composite key endpoint
+      final adjustmentsUrl = 'http://74.208.132.78/api/attendance/update-adjustments';
+      final adjustmentsBody = jsonEncode({
+        'userId': targetUserId,
+        'workDate': workDate,
+        'overtimeHours': overtime,
+        'deductionHours': deduction,
+        'overtimeReason': _overtimeReasonController.text.trim(),
+        'deductionReason': _deductionReasonController.text.trim(),
+      });
+
+      print('📤 API Request - Update Adjustments:');
+      print('   - URL: $adjustmentsUrl');
+      print('   - Method: PUT');
+      print('   - Headers: Content-Type: application/json, Authorization: Bearer {token}');
+      print('   - Body: $adjustmentsBody');
+
       final response = await http.put(
-        Uri.parse('http://74.208.132.78/api/attendance/$attendanceId/adjustments'),
+        Uri.parse(adjustmentsUrl),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'overtimeHours': overtime,
-          'deductionHours': deduction,
-          'overtimeReason': _overtimeReasonController.text.trim(),
-          'deductionReason': _deductionReasonController.text.trim(),
-        }),
+        body: adjustmentsBody,
       );
 
+      print('📥 API Response - Update Adjustments:');
+      print('   - Status Code: ${response.statusCode}');
+      print('   - Response Body: ${response.body}');
+      print('   - Headers: ${response.headers}');
+
       if (response.statusCode == 200) {
+        print('✅ Adjustments update SUCCESS');
+        print('═══════════════════════════════════════════════════════');
+        print('✨ ATTENDANCE ADJUSTMENT COMPLETED SUCCESSFULLY');
+        print('═══════════════════════════════════════════════════════');
+
         if (mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -117,21 +221,35 @@ class _AttendanceAdjustmentDialogState
           widget.onSuccess();
         }
       } else {
+        print('❌ Adjustments update FAILED!');
+        print('   - Expected: 200, Got: ${response.statusCode}');
+        print('   - Error Response: ${response.body}');
+        print('═══════════════════════════════════════════════════════');
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Failed to save: ${response.body}'),
+              content: Text('Failed to save: ${response.statusCode} - ${response.body}'),
               backgroundColor: Colors.red,
+              duration: const Duration(seconds: 7),
             ),
           );
         }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('❌ EXCEPTION CAUGHT!');
+      print('   - Error Type: ${e.runtimeType}');
+      print('   - Error Message: $e');
+      print('   - Stack Trace:');
+      print(stackTrace);
+      print('═══════════════════════════════════════════════════════');
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 7),
           ),
         );
       }
@@ -200,7 +318,16 @@ class _AttendanceAdjustmentDialogState
                   children: [
                     Text(
                       workDate != null
-                          ? DateFormat.yMMMd().format(DateTime.parse(workDate))
+                          ? (() {
+                              try {
+                                final date = workDate is int
+                                    ? DateTime.fromMillisecondsSinceEpoch(workDate, isUtc: true)
+                                    : DateTime.parse(workDate.toString()).toUtc();
+                                return DateFormat.yMMMd().format(date);
+                              } catch (e) {
+                                return workDate.toString();
+                              }
+                            })()
                           : 'Unknown date',
                       style: const TextStyle(fontWeight: FontWeight.w500),
                     ),

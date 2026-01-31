@@ -148,9 +148,39 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
             totalSalary = baseSalary - totalCredits;
 
             daily = List.from(data["dailyBreakdown"] ?? [])
-              ..sort((a, b) =>
-                  DateTime.parse(b["date"])
-                      .compareTo(DateTime.parse(a["date"])));
+              ..sort((a, b) {
+                final aDate = a["date"];
+                final bDate = b["date"];
+
+                int aTimestamp;
+                int bTimestamp;
+
+                if (aDate is int) {
+                  aTimestamp = aDate;
+                } else if (aDate is String) {
+                  try {
+                    aTimestamp = DateTime.parse(aDate).toUtc().millisecondsSinceEpoch;
+                  } catch (e) {
+                    aTimestamp = int.tryParse(aDate) ?? 0;
+                  }
+                } else {
+                  aTimestamp = 0;
+                }
+
+                if (bDate is int) {
+                  bTimestamp = bDate;
+                } else if (bDate is String) {
+                  try {
+                    bTimestamp = DateTime.parse(bDate).toUtc().millisecondsSinceEpoch;
+                  } catch (e) {
+                    bTimestamp = int.tryParse(bDate) ?? 0;
+                  }
+                } else {
+                  bTimestamp = 0;
+                }
+
+                return bTimestamp.compareTo(aTimestamp);
+              });
 
             totalOvertimeHours = 0;
             totalDeductionHours = 0;
@@ -637,12 +667,43 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
                 ),
               )
             else
-              ...daily.asMap().entries.map((entry) {
-                final index = entry.key;
+              ...daily.asMap().entries.where((entry) {
+                final d = entry.value;
+                final status = d["status"] ?? "NOT_STARTED";
+                return status != "NOT_STARTED";
+              }).map((entry) {
                 final d = entry.value;
 
-                  final date = DateFormat.yMMMd()
-                      .format(DateTime.parse(d["date"]));
+                  // Handle both timestamp and date string formats
+                  DateTime dateTime;
+                  final dateValue = d["date"];
+
+                  if (dateValue is int) {
+                    dateTime = DateTime.fromMillisecondsSinceEpoch(dateValue, isUtc: true);
+                  } else if (dateValue is String) {
+                    try {
+                      if (dateValue.contains('-') && dateValue.length == 10 && !dateValue.contains('T')) {
+                        final parts = dateValue.split('-');
+                        dateTime = DateTime.utc(
+                          int.parse(parts[0]),
+                          int.parse(parts[1]),
+                          int.parse(parts[2]),
+                        );
+                      } else {
+                        dateTime = DateTime.parse(dateValue).toUtc();
+                      }
+                    } catch (e) {
+                      try {
+                        dateTime = DateTime.fromMillisecondsSinceEpoch(int.parse(dateValue), isUtc: true);
+                      } catch (e2) {
+                        dateTime = DateTime.now().toUtc();
+                      }
+                    }
+                  } else {
+                    dateTime = DateTime.now().toUtc();
+                  }
+
+                  final date = "${dateTime.day.toString().padLeft(2, '0')}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.year}";
                   final status = d["status"] ?? "NOT_STARTED";
                   final salary = (d["salary"] ?? 0).toDouble();
                   final overtime = (d["overtimeHours"] ?? 0).toDouble();
@@ -652,7 +713,7 @@ class _SalaryDetailsScreenState extends State<SalaryDetailsScreen> {
 
                   bool isWorking = (status == "CHECKED_IN" || status == "COMPLETED" || status == "WORKING");
                   bool isNotWorking = (status == "NOT_WORKING");
-                  bool hasStatus = (status != "NOT_STARTED");
+                  bool hasStatus = true;
                   Color statusColor = isNotWorking ? Colors.red : (isWorking ? Colors.green : Colors.grey);
                   IconData statusIcon = isNotWorking ? Icons.cancel : (isWorking ? Icons.check_circle : Icons.help_outline);
                   String statusText = isNotWorking ? "Not working" : (isWorking ? "Worked" : "No record");
