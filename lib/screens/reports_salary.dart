@@ -105,13 +105,29 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
               ? ((data['baseSalary'] is num) ? data['baseSalary'].toDouble() : double.tryParse(data['baseSalary']?.toString() ?? '') ?? 0.0)
               : totalSalary;
 
+          final dailyBreakdown = (data['dailyBreakdown'] is List) ? data['dailyBreakdown'] : [];
+
+          print('════════════════════════════════════════════════════════');
+          print('💰 SALARY DATA for User $userId (${user['name']})');
+          print('   - Month: $selectedYear-$selectedMonth');
+          print('   - Daily Breakdown Records: ${dailyBreakdown.length}');
+
+          if (dailyBreakdown.isNotEmpty) {
+            print('   - First 5 records:');
+            for (var i = 0; i < (dailyBreakdown.length > 5 ? 5 : dailyBreakdown.length); i++) {
+              final record = dailyBreakdown[i];
+              print('      ${i + 1}. Date: ${record['date']}, Status: ${record['status']}');
+            }
+          }
+          print('════════════════════════════════════════════════════════');
+
           userSalary[userId] = {
             'baseSalary': baseSalary,
             'totalCredits': unpaidCredits,
             'totalSalary': baseSalary - unpaidCredits,
             'totalHours': (data['totalHours'] is num) ? data['totalHours'].toDouble() : double.tryParse(data['totalHours']?.toString() ?? '') ?? 0.0,
             'hourlyRate': (data['hourlyRate'] is num) ? data['hourlyRate'].toDouble() : double.tryParse(data['hourlyRate']?.toString() ?? '') ?? 0.0,
-            'dailyBreakdown': (data['dailyBreakdown'] is List) ? data['dailyBreakdown'] : [],
+            'dailyBreakdown': dailyBreakdown,
           };
         } else {
           userSalary[userId] = {'error': 'Failed to load salary'};
@@ -361,7 +377,31 @@ class _ReportsSalaryScreenState extends State<ReportsSalaryScreen> {
               final status = d['status'] ?? 'NOT_STARTED';
               return status != 'NOT_STARTED';
             }).map((d) {
-              final date = DateTime.tryParse(d['date'] ?? '')?.toUtc();
+              // Parse date - handle both timestamp (milliseconds) and string format
+              DateTime? date;
+              final dateValue = d['date'];
+
+              if (dateValue != null) {
+                if (dateValue is int) {
+                  // Timestamp in milliseconds
+                  date = DateTime.fromMillisecondsSinceEpoch(dateValue, isUtc: true);
+                  print('📅 Parsed date from int timestamp: $dateValue → $date');
+                } else if (dateValue is String) {
+                  // Try parsing as timestamp first
+                  final timestamp = int.tryParse(dateValue);
+                  if (timestamp != null) {
+                    date = DateTime.fromMillisecondsSinceEpoch(timestamp, isUtc: true);
+                    print('📅 Parsed date from string timestamp: $dateValue → $date');
+                  } else {
+                    // Parse as ISO date string
+                    date = DateTime.tryParse(dateValue)?.toUtc();
+                    print('📅 Parsed date from ISO string: $dateValue → $date');
+                  }
+                }
+              } else {
+                print('⚠️ Date value is null for record: $d');
+              }
+
               final hours = (d['hours'] ?? d['workedHours'] ?? 0);
               final hoursDouble = (hours is num) ? hours.toDouble() : double.tryParse(hours.toString()) ?? 0.0;
               final salaryVal = (d['salary'] ?? 0);
